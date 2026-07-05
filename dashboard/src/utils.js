@@ -1,7 +1,9 @@
 export function prettyName(value) {
   return value
-    .replace(/^Users-oleksandrzabolotnyi-Documents-Project-/, "")
-    .replace(/^Users-oleksandrzabolotnyi-\.superset-worktrees-/, "")
+    // Project names are the absolute root path with "/" replaced by "-" - strip the
+    // generic home-directory prefix ("Users-<name>-" on macOS, "home-<name>-" on Linux)
+    // so the display name isn't tied to any one machine's username or folder layout.
+    .replace(/^(Users|home)-[^-]+-/, "")
     .replaceAll("-", " / ");
 }
 

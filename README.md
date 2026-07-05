@@ -61,8 +61,8 @@ Create `~/.codebase-memory-plus/config.json`:
   },
   "projects": [
     {
-      "name": "marswalk",
-      "root": "/Users/you/Documents/Project/marswalk"
+      "name": "my-project",
+      "root": "/Users/you/Documents/Project/my-project"
     }
   ]
 }
@@ -90,7 +90,7 @@ command = "codebase-memory-plus"
 
 ```json
 {
-  "projectRoot": "/Users/you/Documents/Project/marswalk",
+  "projectRoot": "/Users/you/Documents/Project/my-project",
   "includeIndexing": false
 }
 ```

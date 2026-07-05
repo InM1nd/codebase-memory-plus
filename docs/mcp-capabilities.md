@@ -70,11 +70,11 @@ Available but unused, on every `Function`/`Method`:
     without leaving the dashboard.
 11. **Index health indicator** - surface `index_status` + whether embeddings were built
     (inferable from `node_vectors` presence), so it's clear why semantic search sometimes
-    comes back empty. Confirmed on `marswalk`: embeddings do exist (1,138 vectors across
-    Function/Method nodes), a query like "publish" just has no strong match in that
+    comes back empty. Confirmed on a sample project: embeddings do exist (1,138 vectors
+    across Function/Method nodes), a query like "publish" just has no strong match in that
     project's vocabulary - expected behavior, not a broken feature.
 12. **Cross-repo intelligence** - `index_repository(mode: "cross-repo-intelligence")` can
     stitch HTTP/async calls across indexed projects. Relevant given how many related
-    projects/worktrees are already indexed (marswalk, FitLoyalty, and their worktree
+    projects/worktrees can end up indexed at once (a project plus its git worktree
     copies) - a potential multi-project graph view if cross-service relationships ever
     need inspecting.
