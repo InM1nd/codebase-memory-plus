@@ -1,25 +1,66 @@
-import { forceCenter, forceCollide, forceLink, forceManyBody, forceSimulation, forceX, forceY } from "d3-force";
-import { drag } from "d3-drag";
+import {
+  forceCenter,
+  forceCollide,
+  forceLink,
+  forceManyBody,
+  forceSimulation,
+  forceX,
+  forceY,
+  type ForceLink,
+  type Simulation,
+  type SimulationNodeDatum
+} from "d3-force";
+import { drag, type D3DragEvent } from "d3-drag";
 import { quadtree } from "d3-quadtree";
-import { select } from "d3-selection";
+import { select, type Selection } from "d3-selection";
 import "d3-transition";
-import { zoom, zoomIdentity } from "d3-zoom";
+import { zoom, zoomIdentity, type D3ZoomEvent, type ZoomBehavior, type ZoomTransform } from "d3-zoom";
 
 import { clamp, colorForKey, familyColor, packageFamily, packageFromFile, truncate } from "./utils.js";
+import type { GraphEdge, GraphNode } from "./types.js";
 
 // Idle-state edge color - calm and neutral until something is hovered/selected.
 const MUTED_EDGE_COLOR = "#6f827d";
 
-function idOf(value) {
-  return typeof value === "string" ? value : value?.id;
+export type SimNode = GraphNode &
+  SimulationNodeDatum & {
+    degree: number;
+    radius: number;
+    color: string;
+    fx?: number | null;
+    fy?: number | null;
+  };
+
+// d3-force replaces edge.source/target with the resolved node object once the link force
+// initializes - both forms coexist over the object's lifetime, so every read site has to
+// narrow with a typeof check (the original JS already did this defensively).
+export type SimEdge = {
+  type: string;
+  count: number;
+  source: SimNode | string;
+  target: SimNode | string;
+};
+
+export type GraphCallbacks = {
+  onSelectNode?: (node: SimNode) => void;
+  onSelectEdge?: (edge: SimEdge) => void;
+  onHoverNode?: (node: SimNode | null, pos?: { clientX: number; clientY: number }) => void;
+  onBackgroundClick?: () => void;
+};
+
+type Point = { x: number; y: number };
+
+function idOf(value: SimNode | string | null | undefined): string {
+  if (value == null) return "";
+  return typeof value === "string" ? value : value.id;
 }
 
-function edgeKey(edge) {
+function edgeKey(edge: SimEdge | null | undefined): string {
   if (!edge) return "";
   return `${idOf(edge.source)}→${idOf(edge.target)}:${edge.type}`;
 }
 
-function distanceToSegment(px, py, x1, y1, x2, y2) {
+function distanceToSegment(px: number, py: number, x1: number, y1: number, x2: number, y2: number): number {
   const dx = x2 - x1;
   const dy = y2 - y1;
   const lengthSq = dx * dx + dy * dy;
@@ -31,58 +72,76 @@ function distanceToSegment(px, py, x1, y1, x2, y2) {
 }
 
 export class PackageGraph {
-  constructor(canvas, callbacks = {}) {
+  canvas: HTMLCanvasElement;
+  ctx: CanvasRenderingContext2D;
+  onSelectNode: (node: SimNode) => void;
+  onSelectEdge: (edge: SimEdge) => void;
+  onHoverNode: (node: SimNode | null, pos?: { clientX: number; clientY: number }) => void;
+  onBackgroundClick: () => void;
+
+  nodes: SimNode[] = [];
+  edges: SimEdge[] = [];
+  visibleEdges: SimEdge[] = [];
+  maxEdgeCount = 1;
+  topDegreeIds: Set<string> = new Set();
+  filters: { hiddenTypes: Set<string>; minWeight: number } = { hiddenTypes: new Set(), minWeight: 1 };
+  typeColors: Map<string, string> = new Map();
+  sizeMode: "count" | "degree" = "count";
+  isolate = false;
+  layoutMode: "force" | "clustered" | "radial" | "grid" | "tree" = "clustered";
+  _layoutTargets: Map<string, Point> = new Map();
+  _clusterAnchors: Map<string, Point> = new Map();
+
+  selectedNode: SimNode | null = null;
+  selectedEdge: SimEdge | null = null;
+  hoveredNode: SimNode | null = null;
+
+  transform: ZoomTransform = zoomIdentity;
+  dpr: number;
+  width = 0;
+  height = 0;
+  rafId: number | null = null;
+  autoFit = false;
+  dragging = false;
+  dragMoved = false;
+
+  simulation: Simulation<SimNode, SimEdge>;
+  selection: Selection<HTMLCanvasElement, unknown, null, undefined>;
+  zoomBehavior!: ZoomBehavior<HTMLCanvasElement, unknown>;
+  resizeObserver: ResizeObserver;
+
+  constructor(canvas: HTMLCanvasElement, callbacks: GraphCallbacks = {}) {
     this.canvas = canvas;
-    this.ctx = canvas.getContext("2d");
+    this.ctx = canvas.getContext("2d")!;
     this.onSelectNode = callbacks.onSelectNode ?? (() => {});
     this.onSelectEdge = callbacks.onSelectEdge ?? (() => {});
     this.onHoverNode = callbacks.onHoverNode ?? (() => {});
     this.onBackgroundClick = callbacks.onBackgroundClick ?? (() => {});
 
-    this.nodes = [];
-    this.edges = [];
-    this.visibleEdges = [];
-    this.maxEdgeCount = 1;
-    this.topDegreeIds = new Set();
-    this.filters = { hiddenTypes: new Set(), minWeight: 1 };
-    this.typeColors = new Map();
-    this.sizeMode = "count";
-    this.isolate = false;
-    this.layoutMode = "clustered";
-    this._layoutTargets = new Map();
-    this._clusterAnchors = new Map();
-
-    this.selectedNode = null;
-    this.selectedEdge = null;
-    this.hoveredNode = null;
-
-    this.transform = zoomIdentity;
     this.dpr = Math.max(1, window.devicePixelRatio || 1);
-    this.width = 0;
-    this.height = 0;
-    this.rafId = null;
-    this.autoFit = false;
-    this.dragging = false;
-    this.dragMoved = false;
 
-    this.simulation = forceSimulation([])
+    this.simulation = forceSimulation<SimNode, SimEdge>([])
       .force(
         "link",
-        forceLink([])
+        forceLink<SimNode, SimEdge>([])
           .id((d) => d.id)
           .distance((d) => 240 - Math.min(130, (d.count / this.maxEdgeCount) * 130))
           .strength(() => (this._isStructuredLayout() ? 0 : 0.22))
       )
       .force(
         "charge",
-        forceManyBody().strength((d) =>
-          this._isStructuredLayout() ? 0 : -300 - Math.min(700, d.degree * 16)
-        )
+        forceManyBody<SimNode>().strength((d) => (this._isStructuredLayout() ? 0 : -300 - Math.min(700, d.degree * 16)))
       )
-      .force("collide", forceCollide().radius((d) => d.radius + 26))
-      .force("center", forceCenter(0, 0))
-      .force("x", forceX((d) => this._layoutTargetX(d)).strength((d) => this._layoutStrength(d)))
-      .force("y", forceY((d) => this._layoutTargetY(d)).strength((d) => this._layoutStrength(d)))
+      .force("collide", forceCollide<SimNode>().radius((d) => d.radius + 26))
+      .force("center", forceCenter<SimNode>(0, 0))
+      .force(
+        "x",
+        forceX<SimNode>((d) => this._layoutTargetX(d)).strength(() => this._layoutStrength())
+      )
+      .force(
+        "y",
+        forceY<SimNode>((d) => this._layoutTargetY(d)).strength(() => this._layoutStrength())
+      )
       .alphaDecay(0.015)
       .on("tick", () => {
         if (this.autoFit) this.fit(60, 0);
@@ -100,8 +159,8 @@ export class PackageGraph {
     this.resize();
   }
 
-  setData(nodes, edges) {
-    const degree = new Map(nodes.map((node) => [node.id, 0]));
+  setData(nodes: GraphNode[], edges: GraphEdge[]): void {
+    const degree = new Map<string, number>(nodes.map((node) => [node.id, 0]));
     for (const edge of edges) {
       degree.set(edge.source, (degree.get(edge.source) ?? 0) + edge.count);
       degree.set(edge.target, (degree.get(edge.target) ?? 0) + edge.count);
@@ -138,7 +197,7 @@ export class PackageGraph {
     this.filters.minWeight = 1;
 
     const selectedId = this.selectedNode?.id;
-    this.selectedNode = selectedId ? this.nodes.find((node) => node.id === selectedId) ?? null : null;
+    this.selectedNode = selectedId ? (this.nodes.find((node) => node.id === selectedId) ?? null) : null;
     this.selectedEdge = null;
     this.hoveredNode = null;
 
@@ -146,85 +205,83 @@ export class PackageGraph {
     this._applyLayoutTargets();
 
     this.simulation.nodes(this.nodes);
-    this.simulation.force("link").links(this.visibleEdges);
+    (this.simulation.force("link") as ForceLink<SimNode, SimEdge>).links(this.visibleEdges);
     this.autoFit = true;
     this.simulation.alpha(1).restart();
     this.requestRender();
   }
 
-  setFilters(partial) {
+  setFilters(partial: Partial<{ hiddenTypes: Set<string>; minWeight: number }>): void {
     this.filters = { ...this.filters, ...partial };
     this._applyFilters();
-    this.simulation.force("link").links(this.visibleEdges);
+    (this.simulation.force("link") as ForceLink<SimNode, SimEdge>).links(this.visibleEdges);
     this.simulation.alpha(0.6).restart();
     this.requestRender();
   }
 
-  setSizeMode(mode) {
+  setSizeMode(mode: "count" | "degree"): void {
     if (mode !== "count" && mode !== "degree") return;
     this.sizeMode = mode;
     for (const node of this.nodes) {
       node.radius = this._radiusFor(node.count, node.degree);
     }
-    this.simulation.force("collide").radius((d) => d.radius + 16);
+    this.simulation.force<ReturnType<typeof forceCollide<SimNode>>>("collide")?.radius((d) => d.radius + 16);
     this.simulation.alpha(0.4).restart();
     this.requestRender();
   }
 
-  setIsolate(enabled) {
+  setIsolate(enabled: boolean): void {
     this.isolate = Boolean(enabled);
     this.requestRender();
   }
 
-  setLayoutMode(mode) {
+  setLayoutMode(mode: string): void {
     if (!["force", "clustered", "radial", "grid", "tree"].includes(mode)) return;
-    this.layoutMode = mode;
+    this.layoutMode = mode as typeof this.layoutMode;
     this._applyLayoutTargets();
     // Force accessors (link/charge/x/y strength+target) are cached per-node by d3-force at
     // initialize() time - re-registering nodes is what forces every force to re-read them.
     this.simulation.nodes(this.nodes);
-    this.simulation.force("link").links(this.visibleEdges);
+    (this.simulation.force("link") as ForceLink<SimNode, SimEdge>).links(this.visibleEdges);
     this.autoFit = true;
     this.simulation.alpha(1).restart();
     this.requestRender();
   }
 
-  getEdgeTypeColor(type) {
+  getEdgeTypeColor(type: string): string {
     return this._typeColor(type);
   }
 
-  getEdgeTypeCounts() {
-    const counts = new Map();
+  getEdgeTypeCounts(): Array<{ type: string; count: number }> {
+    const counts = new Map<string, number>();
     for (const edge of this.edges) {
       counts.set(edge.type, (counts.get(edge.type) ?? 0) + edge.count);
     }
-    return [...counts.entries()]
-      .map(([type, count]) => ({ type, count }))
-      .sort((a, b) => b.count - a.count);
+    return [...counts.entries()].map(([type, count]) => ({ type, count })).sort((a, b) => b.count - a.count);
   }
 
-  focusNode(node) {
+  focusNode(node: SimNode | null): void {
     this.selectedNode = node ?? null;
     this.selectedEdge = null;
     this.requestRender();
   }
 
-  focusEdge(edge) {
+  focusEdge(edge: SimEdge | null): void {
     this.selectedEdge = edge ?? null;
     this.requestRender();
   }
 
-  clearSelection() {
+  clearSelection(): void {
     this.selectedNode = null;
     this.selectedEdge = null;
     this.requestRender();
   }
 
-  fit(padding = 60, duration = 320, subset = this.nodes) {
+  fit(padding = 60, duration = 320, subset: SimNode[] = this.nodes): void {
     if (!subset.length || !this.width || !this.height) return;
 
-    const xs = subset.map((node) => node.x);
-    const ys = subset.map((node) => node.y);
+    const xs = subset.map((node) => node.x ?? 0);
+    const ys = subset.map((node) => node.y ?? 0);
     const minX = Math.min(...xs) - padding;
     const maxX = Math.max(...xs) + padding;
     const minY = Math.min(...ys) - padding;
@@ -237,21 +294,21 @@ export class PackageGraph {
     const target = zoomIdentity.translate(tx, ty).scale(scale);
 
     if (duration > 0) {
-      this.selection.transition().duration(duration).call(this.zoomBehavior.transform, target);
+      this.selection.transition().duration(duration).call(this.zoomBehavior.transform as never, target);
     } else {
-      this.selection.call(this.zoomBehavior.transform, target);
+      this.selection.call(this.zoomBehavior.transform as never, target);
     }
   }
 
-  centerOn(node, { padding = 200, duration = 420 } = {}) {
+  centerOn(node: SimNode | null, { padding = 200, duration = 420 }: { padding?: number; duration?: number } = {}): void {
     if (!node) return;
     this.autoFit = false;
     const neighbors = this._neighborSet(node);
-    const subset = this.nodes.filter((candidate) => neighbors.has(candidate.id));
+    const subset = this.nodes.filter((candidate) => neighbors?.has(candidate.id));
     this.fit(padding, duration, subset);
   }
 
-  resize() {
+  resize(): void {
     const rect = this.canvas.getBoundingClientRect();
     this.width = Math.max(1, rect.width);
     this.height = Math.max(1, rect.height);
@@ -261,13 +318,13 @@ export class PackageGraph {
     this.requestRender();
   }
 
-  destroy() {
+  destroy(): void {
     this.resizeObserver.disconnect();
     this.simulation.stop();
     if (this.rafId) cancelAnimationFrame(this.rafId);
   }
 
-  requestRender() {
+  requestRender(): void {
     if (this.rafId) return;
     this.rafId = requestAnimationFrame(() => {
       this.rafId = null;
@@ -275,55 +332,53 @@ export class PackageGraph {
     });
   }
 
-  _applyFilters() {
+  _applyFilters(): void {
     const { hiddenTypes, minWeight } = this.filters;
-    this.visibleEdges = this.edges.filter(
-      (edge) => !hiddenTypes.has(edge.type) && edge.count >= minWeight
-    );
+    this.visibleEdges = this.edges.filter((edge) => !hiddenTypes.has(edge.type) && edge.count >= minWeight);
   }
 
-  _typeColor(type) {
+  _typeColor(type: string): string {
     if (!this.typeColors.has(type)) {
       this.typeColors.set(type, colorForKey(type, { saturation: 72, lightness: 62 }));
     }
-    return this.typeColors.get(type);
+    return this.typeColors.get(type)!;
   }
 
-  _radiusFor(count, degree) {
-    const metric = this.sizeMode === "degree" ? degree : count;
+  _radiusFor(count: number | undefined, degree: number): number {
+    const metric = this.sizeMode === "degree" ? degree : (count ?? 0);
     return 10 + Math.min(18, Math.sqrt(metric || 1) * 1.15);
   }
 
-  _isStructuredLayout() {
+  _isStructuredLayout(): boolean {
     return this.layoutMode === "radial" || this.layoutMode === "grid" || this.layoutMode === "tree";
   }
 
   // Packages are keyed by their own id (a slash-delimited folder path); symbols have no
   // such path as their id (a dot-delimited qualified name), so family/depth grouping for
   // them is derived from their containing file's package instead.
-  _familyPathOf(node) {
+  _familyPathOf(node: GraphNode): string {
     return node.kind === "package" ? node.id : packageFromFile(node.file) || "(root)";
   }
 
-  _layoutTargetX(node) {
+  _layoutTargetX(node: SimNode): number {
     if (this.layoutMode === "clustered") return this._clusterAnchors.get(packageFamily(this._familyPathOf(node)))?.x ?? 0;
     if (this._isStructuredLayout()) return this._layoutTargets.get(node.id)?.x ?? 0;
     return 0;
   }
 
-  _layoutTargetY(node) {
+  _layoutTargetY(node: SimNode): number {
     if (this.layoutMode === "clustered") return this._clusterAnchors.get(packageFamily(this._familyPathOf(node)))?.y ?? 0;
     if (this._isStructuredLayout()) return this._layoutTargets.get(node.id)?.y ?? 0;
     return 0;
   }
 
-  _layoutStrength() {
+  _layoutStrength(): number {
     if (this.layoutMode === "clustered") return 0.12;
     if (this._isStructuredLayout()) return 0.9;
     return 0.02;
   }
 
-  _applyLayoutTargets() {
+  _applyLayoutTargets(): void {
     if (this.layoutMode === "clustered") {
       this._clusterAnchors = this._computeClusterAnchors();
     } else if (this.layoutMode === "radial") {
@@ -335,10 +390,10 @@ export class PackageGraph {
     }
   }
 
-  _computeClusterAnchors() {
+  _computeClusterAnchors(): Map<string, Point> {
     const families = [...new Set(this.nodes.map((node) => packageFamily(this._familyPathOf(node))))].sort();
     const radius = Math.max(220, families.length * 70);
-    const map = new Map();
+    const map = new Map<string, Point>();
     families.forEach((family, index) => {
       const angle = (index / families.length) * Math.PI * 2;
       map.set(family, { x: radius * Math.cos(angle), y: radius * Math.sin(angle) });
@@ -346,11 +401,11 @@ export class PackageGraph {
     return map;
   }
 
-  _computeRadialTargets() {
+  _computeRadialTargets(): Map<string, Point> {
     const sorted = [...this.nodes].sort((a, b) => a.id.localeCompare(b.id));
     const totalDiameter = sorted.reduce((sum, node) => sum + node.radius * 2 + 10, 0);
     const radius = Math.max(160, totalDiameter / (Math.PI * 2));
-    const map = new Map();
+    const map = new Map<string, Point>();
     sorted.forEach((node, index) => {
       const angle = (index / sorted.length) * Math.PI * 2 - Math.PI / 2;
       map.set(node.id, { x: radius * Math.cos(angle), y: radius * Math.sin(angle) });
@@ -358,13 +413,13 @@ export class PackageGraph {
     return map;
   }
 
-  _computeGridTargets() {
+  _computeGridTargets(): Map<string, Point> {
     const sorted = [...this.nodes].sort((a, b) => a.id.localeCompare(b.id));
     const maxRadius = Math.max(10, ...sorted.map((node) => node.radius));
     const spacing = maxRadius * 2 + 30;
     const cols = Math.max(1, Math.ceil(Math.sqrt(sorted.length)));
     const rows = Math.max(1, Math.ceil(sorted.length / cols));
-    const map = new Map();
+    const map = new Map<string, Point>();
     sorted.forEach((node, index) => {
       const col = index % cols;
       const row = Math.floor(index / cols);
@@ -379,14 +434,14 @@ export class PackageGraph {
   // Real folder nodes only - each attaches to its nearest existing ancestor package (there's
   // often no real node for an intermediate folder, e.g. "src/components" when every file
   // lives one level deeper). Depth -> horizontal, DFS leaf order -> vertical.
-  _computeTreeTargets() {
+  _computeTreeTargets(): Map<string, Point> {
     const ids = this.nodes.map((node) => node.id);
     const idSet = new Set(ids);
-    const parentOf = new Map();
+    const parentOf = new Map<string, string | null>();
 
     for (const id of ids) {
       let cursor = id;
-      let parent = null;
+      let parent: string | null = null;
       while (true) {
         const idx = cursor.lastIndexOf("/");
         if (idx === -1) break;
@@ -399,26 +454,26 @@ export class PackageGraph {
       parentOf.set(id, parent);
     }
 
-    const childrenOf = new Map(ids.map((id) => [id, []]));
+    const childrenOf = new Map<string, string[]>(ids.map((id) => [id, []]));
     for (const id of ids) {
       const parent = parentOf.get(id);
-      if (parent) childrenOf.get(parent).push(id);
+      if (parent) childrenOf.get(parent)?.push(id);
     }
     const roots = ids.filter((id) => !parentOf.get(id)).sort();
 
     let leafIndex = 0;
-    const yOf = new Map();
-    const depthOf = new Map();
+    const yOf = new Map<string, number>();
+    const depthOf = new Map<string, number>();
 
-    const visit = (id, depth) => {
+    const visit = (id: string, depth: number): void => {
       depthOf.set(id, depth);
-      const children = [...childrenOf.get(id)].sort();
+      const children = [...(childrenOf.get(id) ?? [])].sort();
       if (!children.length) {
         yOf.set(id, leafIndex++);
         return;
       }
       for (const child of children) visit(child, depth + 1);
-      const childYs = children.map((child) => yOf.get(child));
+      const childYs = children.map((child) => yOf.get(child) ?? 0);
       yOf.set(id, (Math.min(...childYs) + Math.max(...childYs)) / 2);
     };
     for (const root of roots) visit(root, 0);
@@ -428,7 +483,7 @@ export class PackageGraph {
     const leafSpan = Math.max(1, leafIndex - 1);
     const rowHeight = Math.max(46, Math.min(90, (this.height - 120) / Math.max(1, leafSpan)));
 
-    const map = new Map();
+    const map = new Map<string, Point>();
     for (const id of ids) {
       const depth = depthOf.get(id) ?? 0;
       const y = yOf.get(id) ?? 0;
@@ -440,35 +495,36 @@ export class PackageGraph {
     return map;
   }
 
-  _toGraphCoords(px, py) {
+  _toGraphCoords(px: number, py: number): [number, number] {
     return [(px - this.transform.x) / this.transform.k, (py - this.transform.y) / this.transform.k];
   }
 
-  _pointerPos(event) {
+  _pointerPos(event: { clientX: number; clientY: number }): [number, number] {
     const rect = this.canvas.getBoundingClientRect();
     return [event.clientX - rect.left, event.clientY - rect.top];
   }
 
-  _findNode(x, y) {
+  _findNode(x: number, y: number): SimNode | null {
     if (!this.nodes.length) return null;
-    const tree = quadtree(
+    const tree = quadtree<SimNode>(
       this.nodes,
-      (node) => node.x,
-      (node) => node.y
+      (node) => node.x ?? 0,
+      (node) => node.y ?? 0
     );
     const searchRadius = 26 / this.transform.k;
-    let found = null;
+    let found: SimNode | null = null;
     let bestDist = Infinity;
     tree.visit((node, x0, y0, x1, y1) => {
-      if (!node.length) {
-        let candidate = node;
+      if (!("length" in node)) {
+        let candidate: typeof node | undefined = node;
         do {
-          const dx = candidate.data.x - x;
-          const dy = candidate.data.y - y;
+          const data = candidate.data;
+          const dx = (data.x ?? 0) - x;
+          const dy = (data.y ?? 0) - y;
           const dist = Math.hypot(dx, dy);
-          if (dist <= Math.max(candidate.data.radius, searchRadius) && dist < bestDist) {
+          if (dist <= Math.max(data.radius, searchRadius) && dist < bestDist) {
             bestDist = dist;
-            found = candidate.data;
+            found = data;
           }
           candidate = candidate.next;
         } while (candidate);
@@ -478,15 +534,15 @@ export class PackageGraph {
     return found;
   }
 
-  _findEdge(x, y) {
+  _findEdge(x: number, y: number): SimEdge | null {
     const threshold = 8 / this.transform.k;
-    let found = null;
+    let found: SimEdge | null = null;
     let bestDist = Infinity;
     for (const edge of this.visibleEdges) {
       const s = edge.source;
       const t = edge.target;
       if (!s || typeof s === "string" || !t || typeof t === "string") continue;
-      const dist = distanceToSegment(x, y, s.x, s.y, t.x, t.y);
+      const dist = distanceToSegment(x, y, s.x ?? 0, s.y ?? 0, t.x ?? 0, t.y ?? 0);
       if (dist <= threshold && dist < bestDist) {
         bestDist = dist;
         found = edge;
@@ -495,9 +551,9 @@ export class PackageGraph {
     return found;
   }
 
-  _neighborSet(node) {
+  _neighborSet(node: SimNode | null): Set<string> | null {
     if (!node) return null;
-    const set = new Set([node.id]);
+    const set = new Set<string>([node.id]);
     for (const edge of this.visibleEdges) {
       const sourceId = idOf(edge.source);
       const targetId = idOf(edge.target);
@@ -507,22 +563,24 @@ export class PackageGraph {
     return set;
   }
 
-  _setupZoom() {
-    this.zoomBehavior = zoom()
+  _setupZoom(): void {
+    this.zoomBehavior = zoom<HTMLCanvasElement, unknown>()
       .scaleExtent([0.15, 6])
-      .filter((event) => {
+      .filter((event: Event) => {
         if (event.type === "wheel") return true;
-        if (event.button) return false;
-        const [px, py] = event.touches
-          ? [event.touches[0].clientX - this.canvas.getBoundingClientRect().left, event.touches[0].clientY - this.canvas.getBoundingClientRect().top]
-          : this._pointerPos(event);
+        if ((event as MouseEvent).button) return false;
+        const touchEvent = event as TouchEvent;
+        const rect = this.canvas.getBoundingClientRect();
+        const [px, py] = touchEvent.touches?.length
+          ? [touchEvent.touches[0].clientX - rect.left, touchEvent.touches[0].clientY - rect.top]
+          : this._pointerPos(event as MouseEvent);
         const [x, y] = this._toGraphCoords(px, py);
         return !this._findNode(x, y);
       })
-      .on("start", (event) => {
+      .on("start", (event: D3ZoomEvent<HTMLCanvasElement, unknown>) => {
         if (event.sourceEvent) this.autoFit = false;
       })
-      .on("zoom", (event) => {
+      .on("zoom", (event: D3ZoomEvent<HTMLCanvasElement, unknown>) => {
         this.transform = event.transform;
         this.requestRender();
       });
@@ -530,9 +588,9 @@ export class PackageGraph {
     this.selection.call(this.zoomBehavior);
   }
 
-  _setupDrag() {
-    const dragSubject = (event) => {
-      const [px, py] = this._pointerPos(event.sourceEvent);
+  _setupDrag(): void {
+    const dragSubject = (event: D3DragEvent<HTMLCanvasElement, unknown, SimNode | undefined>): SimNode | undefined => {
+      const [px, py] = this._pointerPos(event.sourceEvent as MouseEvent);
       const [x, y] = this._toGraphCoords(px, py);
       const node = this._findNode(x, y);
       if (node) {
@@ -542,9 +600,9 @@ export class PackageGraph {
       return node ?? undefined;
     };
 
-    const behavior = drag()
+    const behavior = drag<HTMLCanvasElement, unknown, SimNode | undefined>()
       .subject(dragSubject)
-      .on("start", (event) => {
+      .on("start", (event: D3DragEvent<HTMLCanvasElement, unknown, SimNode>) => {
         this.autoFit = false;
         this.dragging = true;
         this.dragMoved = false;
@@ -552,15 +610,15 @@ export class PackageGraph {
         event.subject.fx = event.subject.x;
         event.subject.fy = event.subject.y;
       })
-      .on("drag", (event) => {
+      .on("drag", (event: D3DragEvent<HTMLCanvasElement, unknown, SimNode>) => {
         this.dragMoved = true;
-        const [px, py] = this._pointerPos(event.sourceEvent);
+        const [px, py] = this._pointerPos(event.sourceEvent as MouseEvent);
         const [x, y] = this._toGraphCoords(px, py);
         event.subject.fx = x;
         event.subject.fy = y;
         this.requestRender();
       })
-      .on("end", (event) => {
+      .on("end", (event: D3DragEvent<HTMLCanvasElement, unknown, SimNode>) => {
         this.dragging = false;
         if (!event.active) this.simulation.alphaTarget(0);
       });
@@ -568,8 +626,8 @@ export class PackageGraph {
     this.selection.call(behavior);
   }
 
-  _setupPointerEvents() {
-    this.canvas.addEventListener("pointermove", (event) => {
+  _setupPointerEvents(): void {
+    this.canvas.addEventListener("pointermove", (event: PointerEvent) => {
       if (this.dragging) return;
       const [px, py] = this._pointerPos(event);
       const [x, y] = this._toGraphCoords(px, py);
@@ -593,15 +651,15 @@ export class PackageGraph {
     // Native click/dblclick are unreliable here: d3-zoom swallows the click
     // event that follows any mouse-based pan gesture, even a zero-movement
     // one, so clicks are detected manually from pointerdown/pointerup instead.
-    let downPos = null;
-    let lastUp = null;
+    let downPos: [number, number] | null = null;
+    let lastUp: { time: number; x: number; y: number } | null = null;
 
-    this.canvas.addEventListener("pointerdown", (event) => {
+    this.canvas.addEventListener("pointerdown", (event: PointerEvent) => {
       if (event.button) return;
       downPos = [event.clientX, event.clientY];
     });
 
-    this.canvas.addEventListener("pointerup", (event) => {
+    this.canvas.addEventListener("pointerup", (event: PointerEvent) => {
       if (!downPos) return;
       const moved = Math.hypot(event.clientX - downPos[0], event.clientY - downPos[1]);
       downPos = null;
@@ -618,9 +676,7 @@ export class PackageGraph {
 
       const now = performance.now();
       const isDoubleClick =
-        lastUp &&
-        now - lastUp.time < 320 &&
-        Math.hypot(event.clientX - lastUp.x, event.clientY - lastUp.y) < 6;
+        lastUp !== null && now - lastUp.time < 320 && Math.hypot(event.clientX - lastUp.x, event.clientY - lastUp.y) < 6;
       lastUp = { time: now, x: event.clientX, y: event.clientY };
 
       if (isDoubleClick) {
@@ -652,7 +708,7 @@ export class PackageGraph {
     });
   }
 
-  _draw() {
+  _draw(): void {
     const { ctx, dpr, transform } = this;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
@@ -667,8 +723,8 @@ export class PackageGraph {
     const isolateSet = this.isolate && this.selectedNode ? this._neighborSet(this.selectedNode) : null;
     const hoverSet = this._neighborSet(this.hoveredNode ?? this.selectedNode);
     const focused = Boolean(hoverSet);
-    const reciprocal = new Set();
-    const seen = new Set();
+    const reciprocal = new Set<string>();
+    const seen = new Set<string>();
     for (const edge of this.visibleEdges) {
       seen.add(`${idOf(edge.source)}|${idOf(edge.target)}`);
     }
@@ -688,16 +744,12 @@ export class PackageGraph {
       const active = edgeKey(edge) === edgeKey(this.selectedEdge);
       // Every edge gets a gentle arc (not just reciprocal pairs) so a dense graph reads as
       // a web rather than a ruler-straight tangle; reciprocal pairs arc further apart.
-      const curvature = reciprocal.has(`${s.id}|${t.id}`)
-        ? (s.id < t.id ? 18 : -18)
-        : s.id < t.id
-          ? 9
-          : -9;
+      const curvature = reciprocal.has(`${s.id}|${t.id}`) ? (s.id < t.id ? 18 : -18) : s.id < t.id ? 9 : -9;
       const weight = clamp(0.6 + (edge.count / this.maxEdgeCount) * 1.8, 0.6, 2.4);
 
-      let strokeStyle;
-      let alpha;
-      let lineWidth;
+      let strokeStyle: string;
+      let alpha: number;
+      let lineWidth: number;
       if (active) {
         strokeStyle = "#4fd1c5";
         alpha = 0.95;
@@ -716,26 +768,30 @@ export class PackageGraph {
         lineWidth = weight;
       }
 
-      const mx = (s.x + t.x) / 2;
-      const my = (s.y + t.y) / 2;
-      const dx = t.x - s.x;
-      const dy = t.y - s.y;
+      const sx = s.x ?? 0;
+      const sy = s.y ?? 0;
+      const tx = t.x ?? 0;
+      const ty = t.y ?? 0;
+      const mx = (sx + tx) / 2;
+      const my = (sy + ty) / 2;
+      const dx = tx - sx;
+      const dy = ty - sy;
       const len = Math.hypot(dx, dy) || 1;
       const cx = mx + (-dy / len) * curvature;
       const cy = my + (dx / len) * curvature;
 
       ctx.beginPath();
-      ctx.moveTo(s.x, s.y);
-      ctx.quadraticCurveTo(cx, cy, t.x, t.y);
+      ctx.moveTo(sx, sy);
+      ctx.quadraticCurveTo(cx, cy, tx, ty);
       ctx.strokeStyle = strokeStyle;
       ctx.globalAlpha = alpha;
       ctx.lineWidth = lineWidth;
       ctx.lineCap = "round";
       ctx.stroke();
 
-      const angle = Math.atan2(t.y - cy, t.x - cx);
-      const tipX = t.x - Math.cos(angle) * (t.radius + 1);
-      const tipY = t.y - Math.sin(angle) * (t.radius + 1);
+      const angle = Math.atan2(ty - cy, tx - cx);
+      const tipX = tx - Math.cos(angle) * (t.radius + 1);
+      const tipY = ty - Math.sin(angle) * (t.radius + 1);
       ctx.beginPath();
       ctx.moveTo(tipX, tipY);
       ctx.lineTo(tipX - Math.cos(angle - 0.42) * 6, tipY - Math.sin(angle - 0.42) * 6);
@@ -751,10 +807,12 @@ export class PackageGraph {
       if (isolateSet && !isolateSet.has(node.id)) continue;
       const dimmed = hoverSet ? !hoverSet.has(node.id) : false;
       const isActive = this.selectedNode?.id === node.id || this.hoveredNode?.id === node.id;
+      const nx = node.x ?? 0;
+      const ny = node.y ?? 0;
 
       ctx.globalAlpha = dimmed ? 0.22 : 1;
       ctx.beginPath();
-      ctx.arc(node.x, node.y, node.radius, 0, Math.PI * 2);
+      ctx.arc(nx, ny, node.radius, 0, Math.PI * 2);
       ctx.fillStyle = node.color;
       ctx.fill();
       ctx.lineWidth = isActive ? 2.5 : 1.2;
@@ -763,25 +821,23 @@ export class PackageGraph {
 
       if (node.fx != null) {
         ctx.beginPath();
-        ctx.arc(node.x, node.y, 2.5, 0, Math.PI * 2);
+        ctx.arc(nx, ny, 2.5, 0, Math.PI * 2);
         ctx.fillStyle = "#0b0e0e";
         ctx.fill();
       }
 
-      const showLabel = hoverSet
-        ? hoverSet.has(node.id)
-        : transform.k >= 1.3 || this.topDegreeIds.has(node.id);
+      const showLabel = hoverSet ? hoverSet.has(node.id) : transform.k >= 1.3 || this.topDegreeIds.has(node.id);
 
       if (showLabel && !dimmed) {
         const label = truncate(node.label, 26);
         ctx.font = "600 11px Inter, ui-sans-serif, system-ui, sans-serif";
         ctx.textBaseline = "middle";
-        const textX = node.x + node.radius + 8;
+        const textX = nx + node.radius + 8;
         const metrics = ctx.measureText(label);
         ctx.fillStyle = "rgba(8, 12, 12, 0.72)";
-        ctx.fillRect(textX - 3, node.y - 8, metrics.width + 6, 16);
+        ctx.fillRect(textX - 3, ny - 8, metrics.width + 6, 16);
         ctx.fillStyle = "#f4f7f6";
-        ctx.fillText(label, textX, node.y);
+        ctx.fillText(label, textX, ny);
       }
     }
 

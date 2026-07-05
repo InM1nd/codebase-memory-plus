@@ -1,9 +1,66 @@
 import { ApiError, deleteJson, getJson, postJson, putJson } from "./api.js";
-import { PackageGraph } from "./graph.js";
+import { PackageGraph, type SimEdge, type SimNode } from "./graph.js";
 import { loadPrefs, savePrefs } from "./storage.js";
 import { debounce, edgeKey, escapeHtml, formatNumber, packageFromFile, prettyName, truncate } from "./utils.js";
+import type {
+  AdrResult,
+  ArchitectureInsights,
+  CachedProject,
+  CrossRepoLink,
+  CrossRepoResponse,
+  DuplicatePair,
+  FileChurn,
+  GraphNode,
+  GraphResponse,
+  ImpactResult,
+  ImpactedSymbol,
+  IndexHealth,
+  PackageDetails,
+  PerfRisk,
+  ProjectsResponse,
+  ProjectSummary,
+  QueryResult,
+  SearchResponse,
+  SearchResult,
+  SymbolMeta,
+  TraceResult
+} from "./types.js";
 
-const state = {
+type TraceMode = "calls" | "data_flow" | "cross_service";
+type TraceDirection = "both" | "inbound" | "outbound";
+
+type DashboardState = {
+  projects: CachedProject[];
+  projectSort: "size" | "name" | "recent";
+  graphMode: "packages" | "symbols";
+  activeProject: string | null;
+  summary: ProjectSummary | null;
+  graph: GraphResponse;
+  selectedNode: SimNode | null;
+  selectedEdge: SimEdge | null;
+  packageDetails: PackageDetails | null;
+  hiddenEdgeTypes: Set<string>;
+  minWeight: number;
+  isolate: boolean;
+  architecture: ArchitectureInsights | null;
+  apiSurface: unknown;
+  configMap: unknown;
+  churn: FileChurn[] | null;
+  perf: PerfRisk[] | null;
+  duplicates: DuplicatePair[] | null;
+  impact: ImpactResult | null;
+  crossRepoProjects: CachedProject[] | null;
+  trace: {
+    symbol: string | null;
+    label: string | null;
+    mode: TraceMode;
+    direction: TraceDirection;
+    depth: number;
+    includeTests: boolean;
+  };
+};
+
+const state: DashboardState = {
   projects: [],
   projectSort: "size",
   graphMode: "packages",
@@ -27,119 +84,123 @@ const state = {
   trace: { symbol: null, label: null, mode: "calls", direction: "both", depth: 3, includeTests: false }
 };
 
+function q<T extends Element>(id: string): T {
+  return document.querySelector<T>(id)!;
+}
+
 const els = {
-  homeView: document.querySelector("#homeView"),
-  workspaceView: document.querySelector("#workspaceView"),
-  projectGrid: document.querySelector("#projectGrid"),
-  projectSearch: document.querySelector("#projectSearch"),
-  projectSort: document.querySelector("#projectSort"),
-  recentProjects: document.querySelector("#recentProjects"),
-  recentProjectsGrid: document.querySelector("#recentProjectsGrid"),
-  homeButton: document.querySelector("#homeButton"),
-  allProjectsButton: document.querySelector("#allProjectsButton"),
-  projectTitle: document.querySelector("#projectTitle"),
-  breadcrumb: document.querySelector("#breadcrumb"),
-  breadcrumbProject: document.querySelector("#breadcrumbProject"),
-  breadcrumbPackage: document.querySelector("#breadcrumbPackage"),
-  breadcrumbClear: document.querySelector("#breadcrumbClear"),
-  nodesMetric: document.querySelector("#nodesMetric"),
-  edgesMetric: document.querySelector("#edgesMetric"),
-  packagesMetric: document.querySelector("#packagesMetric"),
-  topPackageMetric: document.querySelector("#topPackageMetric"),
-  indexHealth: document.querySelector("#indexHealth"),
-  labelBars: document.querySelector("#labelBars"),
-  graphCanvas: document.querySelector("#graph"),
-  graphModePackages: document.querySelector("#graphModePackages"),
-  graphModeSymbols: document.querySelector("#graphModeSymbols"),
-  layoutMode: document.querySelector("#layoutMode"),
-  graphFamily: document.querySelector("#graphFamily"),
-  graphLimit: document.querySelector("#graphLimit"),
-  graphTooltip: document.querySelector("#graphTooltip"),
-  graphStatus: document.querySelector("#graphStatus"),
-  graphStatusMessage: document.querySelector("#graphStatusMessage"),
-  graphRetry: document.querySelector("#graphRetry"),
-  edgeTypeFilters: document.querySelector("#edgeTypeFilters"),
-  sizeByCount: document.querySelector("#sizeByCount"),
-  sizeByDegree: document.querySelector("#sizeByDegree"),
-  isolateButton: document.querySelector("#isolateButton"),
-  minWeight: document.querySelector("#minWeight"),
-  minWeightValue: document.querySelector("#minWeightValue"),
-  relationsTitle: document.querySelector("#relationsTitle"),
-  edgeList: document.querySelector("#edgeList"),
-  relationCount: document.querySelector("#relationCount"),
-  detailTitle: document.querySelector("#detailTitle"),
-  detailSubtitle: document.querySelector("#detailSubtitle"),
-  detailsTabSelection: document.querySelector("#detailsTabSelection"),
-  detailsTabInsights: document.querySelector("#detailsTabInsights"),
-  selectionTabPanel: document.querySelector("#selectionTabPanel"),
-  insightsTabPanel: document.querySelector("#insightsTabPanel"),
-  compositionToggle: document.querySelector("#compositionToggle"),
-  compositionPanel: document.querySelector("#compositionPanel"),
-  architectureToggle: document.querySelector("#architectureToggle"),
-  architecturePanel: document.querySelector("#architecturePanel"),
-  architectureStatus: document.querySelector("#architectureStatus"),
-  architectureBody: document.querySelector("#architectureBody"),
-  archLayers: document.querySelector("#archLayers"),
-  archHotspots: document.querySelector("#archHotspots"),
-  archBoundaries: document.querySelector("#archBoundaries"),
-  archClusters: document.querySelector("#archClusters"),
-  apiSurfaceStatus: document.querySelector("#apiSurfaceStatus"),
-  apiSurface: document.querySelector("#apiSurface"),
-  configMapStatus: document.querySelector("#configMapStatus"),
-  configMap: document.querySelector("#configMap"),
-  churnStatus: document.querySelector("#churnStatus"),
-  churnList: document.querySelector("#churnList"),
-  perfToggle: document.querySelector("#perfToggle"),
-  perfPanel: document.querySelector("#perfPanel"),
-  perfStatus: document.querySelector("#perfStatus"),
-  perfList: document.querySelector("#perfList"),
-  duplicatesToggle: document.querySelector("#duplicatesToggle"),
-  duplicatesPanel: document.querySelector("#duplicatesPanel"),
-  duplicatesStatus: document.querySelector("#duplicatesStatus"),
-  duplicatesList: document.querySelector("#duplicatesList"),
-  impactToggle: document.querySelector("#impactToggle"),
-  impactPanel: document.querySelector("#impactPanel"),
-  impactStatus: document.querySelector("#impactStatus"),
-  impactBody: document.querySelector("#impactBody"),
-  impactFiles: document.querySelector("#impactFiles"),
-  impactSymbols: document.querySelector("#impactSymbols"),
-  crossRepoToggle: document.querySelector("#crossRepoToggle"),
-  crossRepoPanel: document.querySelector("#crossRepoPanel"),
-  crossRepoProjects: document.querySelector("#crossRepoProjects"),
-  crossRepoRun: document.querySelector("#crossRepoRun"),
-  crossRepoStatus: document.querySelector("#crossRepoStatus"),
-  crossRepoList: document.querySelector("#crossRepoList"),
-  packageSymbols: document.querySelector("#packageSymbols"),
-  headerSearch: document.querySelector("#headerSearch"),
-  searchLabelFilter: document.querySelector("#searchLabelFilter"),
-  globalSymbolSearch: document.querySelector("#globalSymbolSearch"),
-  globalSearchResults: document.querySelector("#globalSearchResults"),
-  refreshButton: document.querySelector("#refreshButton"),
-  fitButton: document.querySelector("#fitButton"),
-  shortcutsHelp: document.querySelector("#shortcutsHelp"),
-  shortcutsButton: document.querySelector("#shortcutsButton"),
-  shortcutsClose: document.querySelector("#shortcutsClose"),
-  adrButton: document.querySelector("#adrButton"),
-  adrDialog: document.querySelector("#adrDialog"),
-  adrHint: document.querySelector("#adrHint"),
-  adrTextarea: document.querySelector("#adrTextarea"),
-  adrSave: document.querySelector("#adrSave"),
-  adrSaveStatus: document.querySelector("#adrSaveStatus"),
-  adrClose: document.querySelector("#adrClose"),
-  queryButton: document.querySelector("#queryButton"),
-  queryDialog: document.querySelector("#queryDialog"),
-  queryTextarea: document.querySelector("#queryTextarea"),
-  queryRun: document.querySelector("#queryRun"),
-  queryStatus: document.querySelector("#queryStatus"),
-  queryResults: document.querySelector("#queryResults"),
-  queryClose: document.querySelector("#queryClose"),
-  traceDialog: document.querySelector("#traceDialog"),
-  traceTitle: document.querySelector("#traceTitle"),
-  traceBody: document.querySelector("#traceBody"),
-  traceClose: document.querySelector("#traceClose"),
-  traceDirection: document.querySelector("#traceDirection"),
-  traceDepth: document.querySelector("#traceDepth"),
-  traceIncludeTests: document.querySelector("#traceIncludeTests")
+  homeView: q<HTMLElement>("#homeView"),
+  workspaceView: q<HTMLElement>("#workspaceView"),
+  projectGrid: q<HTMLDivElement>("#projectGrid"),
+  projectSearch: q<HTMLInputElement>("#projectSearch"),
+  projectSort: q<HTMLSelectElement>("#projectSort"),
+  recentProjects: q<HTMLElement>("#recentProjects"),
+  recentProjectsGrid: q<HTMLDivElement>("#recentProjectsGrid"),
+  homeButton: q<HTMLButtonElement>("#homeButton"),
+  allProjectsButton: q<HTMLButtonElement>("#allProjectsButton"),
+  projectTitle: q<HTMLHeadingElement>("#projectTitle"),
+  breadcrumb: q<HTMLElement>("#breadcrumb"),
+  breadcrumbProject: q<HTMLSpanElement>("#breadcrumbProject"),
+  breadcrumbPackage: q<HTMLSpanElement>("#breadcrumbPackage"),
+  breadcrumbClear: q<HTMLButtonElement>("#breadcrumbClear"),
+  nodesMetric: q<HTMLElement>("#nodesMetric"),
+  edgesMetric: q<HTMLElement>("#edgesMetric"),
+  packagesMetric: q<HTMLElement>("#packagesMetric"),
+  topPackageMetric: q<HTMLElement>("#topPackageMetric"),
+  indexHealth: q<HTMLDivElement>("#indexHealth"),
+  labelBars: q<HTMLDivElement>("#labelBars"),
+  graphCanvas: q<HTMLCanvasElement>("#graph"),
+  graphModePackages: q<HTMLButtonElement>("#graphModePackages"),
+  graphModeSymbols: q<HTMLButtonElement>("#graphModeSymbols"),
+  layoutMode: q<HTMLSelectElement>("#layoutMode"),
+  graphFamily: q<HTMLSelectElement>("#graphFamily"),
+  graphLimit: q<HTMLSelectElement>("#graphLimit"),
+  graphTooltip: q<HTMLDivElement>("#graphTooltip"),
+  graphStatus: q<HTMLDivElement>("#graphStatus"),
+  graphStatusMessage: q<HTMLParagraphElement>("#graphStatusMessage"),
+  graphRetry: q<HTMLButtonElement>("#graphRetry"),
+  edgeTypeFilters: q<HTMLDivElement>("#edgeTypeFilters"),
+  sizeByCount: q<HTMLButtonElement>("#sizeByCount"),
+  sizeByDegree: q<HTMLButtonElement>("#sizeByDegree"),
+  isolateButton: q<HTMLButtonElement>("#isolateButton"),
+  minWeight: q<HTMLInputElement>("#minWeight"),
+  minWeightValue: q<HTMLSpanElement>("#minWeightValue"),
+  relationsTitle: q<HTMLHeadingElement>("#relationsTitle"),
+  edgeList: q<HTMLDivElement>("#edgeList"),
+  relationCount: q<HTMLSpanElement>("#relationCount"),
+  detailTitle: q<HTMLHeadingElement>("#detailTitle"),
+  detailSubtitle: q<HTMLParagraphElement>("#detailSubtitle"),
+  detailsTabSelection: q<HTMLButtonElement>("#detailsTabSelection"),
+  detailsTabInsights: q<HTMLButtonElement>("#detailsTabInsights"),
+  selectionTabPanel: q<HTMLDivElement>("#selectionTabPanel"),
+  insightsTabPanel: q<HTMLDivElement>("#insightsTabPanel"),
+  compositionToggle: q<HTMLButtonElement>("#compositionToggle"),
+  compositionPanel: q<HTMLDivElement>("#compositionPanel"),
+  architectureToggle: q<HTMLButtonElement>("#architectureToggle"),
+  architecturePanel: q<HTMLDivElement>("#architecturePanel"),
+  architectureStatus: q<HTMLParagraphElement>("#architectureStatus"),
+  architectureBody: q<HTMLDivElement>("#architectureBody"),
+  archLayers: q<HTMLDivElement>("#archLayers"),
+  archHotspots: q<HTMLDivElement>("#archHotspots"),
+  archBoundaries: q<HTMLDivElement>("#archBoundaries"),
+  archClusters: q<HTMLDivElement>("#archClusters"),
+  apiSurfaceStatus: q<HTMLParagraphElement>("#apiSurfaceStatus"),
+  apiSurface: q<HTMLDivElement>("#apiSurface"),
+  configMapStatus: q<HTMLParagraphElement>("#configMapStatus"),
+  configMap: q<HTMLDivElement>("#configMap"),
+  churnStatus: q<HTMLParagraphElement>("#churnStatus"),
+  churnList: q<HTMLDivElement>("#churnList"),
+  perfToggle: q<HTMLButtonElement>("#perfToggle"),
+  perfPanel: q<HTMLDivElement>("#perfPanel"),
+  perfStatus: q<HTMLParagraphElement>("#perfStatus"),
+  perfList: q<HTMLDivElement>("#perfList"),
+  duplicatesToggle: q<HTMLButtonElement>("#duplicatesToggle"),
+  duplicatesPanel: q<HTMLDivElement>("#duplicatesPanel"),
+  duplicatesStatus: q<HTMLParagraphElement>("#duplicatesStatus"),
+  duplicatesList: q<HTMLDivElement>("#duplicatesList"),
+  impactToggle: q<HTMLButtonElement>("#impactToggle"),
+  impactPanel: q<HTMLDivElement>("#impactPanel"),
+  impactStatus: q<HTMLParagraphElement>("#impactStatus"),
+  impactBody: q<HTMLDivElement>("#impactBody"),
+  impactFiles: q<HTMLDivElement>("#impactFiles"),
+  impactSymbols: q<HTMLDivElement>("#impactSymbols"),
+  crossRepoToggle: q<HTMLButtonElement>("#crossRepoToggle"),
+  crossRepoPanel: q<HTMLDivElement>("#crossRepoPanel"),
+  crossRepoProjects: q<HTMLDivElement>("#crossRepoProjects"),
+  crossRepoRun: q<HTMLButtonElement>("#crossRepoRun"),
+  crossRepoStatus: q<HTMLParagraphElement>("#crossRepoStatus"),
+  crossRepoList: q<HTMLDivElement>("#crossRepoList"),
+  packageSymbols: q<HTMLDivElement>("#packageSymbols"),
+  headerSearch: q<HTMLDivElement>("#headerSearch"),
+  searchLabelFilter: q<HTMLSelectElement>("#searchLabelFilter"),
+  globalSymbolSearch: q<HTMLInputElement>("#globalSymbolSearch"),
+  globalSearchResults: q<HTMLDivElement>("#globalSearchResults"),
+  refreshButton: q<HTMLButtonElement>("#refreshButton"),
+  fitButton: q<HTMLButtonElement>("#fitButton"),
+  shortcutsHelp: q<HTMLDivElement>("#shortcutsHelp"),
+  shortcutsButton: q<HTMLButtonElement>("#shortcutsButton"),
+  shortcutsClose: q<HTMLButtonElement>("#shortcutsClose"),
+  adrButton: q<HTMLButtonElement>("#adrButton"),
+  adrDialog: q<HTMLDivElement>("#adrDialog"),
+  adrHint: q<HTMLParagraphElement>("#adrHint"),
+  adrTextarea: q<HTMLTextAreaElement>("#adrTextarea"),
+  adrSave: q<HTMLButtonElement>("#adrSave"),
+  adrSaveStatus: q<HTMLSpanElement>("#adrSaveStatus"),
+  adrClose: q<HTMLButtonElement>("#adrClose"),
+  queryButton: q<HTMLButtonElement>("#queryButton"),
+  queryDialog: q<HTMLDivElement>("#queryDialog"),
+  queryTextarea: q<HTMLTextAreaElement>("#queryTextarea"),
+  queryRun: q<HTMLButtonElement>("#queryRun"),
+  queryStatus: q<HTMLSpanElement>("#queryStatus"),
+  queryResults: q<HTMLDivElement>("#queryResults"),
+  queryClose: q<HTMLButtonElement>("#queryClose"),
+  traceDialog: q<HTMLDivElement>("#traceDialog"),
+  traceTitle: q<HTMLHeadingElement>("#traceTitle"),
+  traceBody: q<HTMLDivElement>("#traceBody"),
+  traceClose: q<HTMLButtonElement>("#traceClose"),
+  traceDirection: q<HTMLSelectElement>("#traceDirection"),
+  traceDepth: q<HTMLSelectElement>("#traceDepth"),
+  traceIncludeTests: q<HTMLInputElement>("#traceIncludeTests")
 };
 
 const graph = new PackageGraph(els.graphCanvas, {
@@ -154,8 +215,8 @@ const graph = new PackageGraph(els.graphCanvas, {
     state.selectedEdge = edge;
     const node = state.graph.nodes.find((candidate) => candidate.id === edgeSourceId(edge));
     if (node) {
-      state.selectedNode = node;
-      void selectGraphNode(node);
+      state.selectedNode = node as SimNode;
+      void selectGraphNode(node as SimNode);
     }
     renderRelations();
     renderBreadcrumb();
@@ -164,7 +225,7 @@ const graph = new PackageGraph(els.graphCanvas, {
   onBackgroundClick: () => clearSelection()
 });
 
-function clearSelection() {
+function clearSelection(): void {
   state.selectedNode = null;
   state.selectedEdge = null;
   graph.clearSelection();
@@ -173,17 +234,17 @@ function clearSelection() {
   renderBreadcrumb();
 }
 
-function renderBreadcrumb() {
+function renderBreadcrumb(): void {
   const has = Boolean(state.selectedNode);
   els.breadcrumb.hidden = !has;
-  if (!has) return;
+  if (!has || !state.selectedNode) return;
   els.breadcrumbProject.textContent = prettyName(state.activeProject ?? "");
   els.breadcrumbPackage.textContent = state.selectedNode.label;
 }
 
 await boot();
 
-async function boot() {
+async function boot(): Promise<void> {
   bindEvents();
   const prefs = loadPrefs();
   if (prefs.sizeBy === "degree") setSizeMode("degree");
@@ -197,10 +258,10 @@ async function boot() {
   await loadProjects();
 }
 
-function bindEvents() {
+function bindEvents(): void {
   els.projectSearch.addEventListener("input", renderProjectGrid);
   els.projectSort.addEventListener("change", () => {
-    state.projectSort = els.projectSort.value;
+    state.projectSort = els.projectSort.value as DashboardState["projectSort"];
     savePrefs({ projectSort: state.projectSort });
     renderProjectGrid();
   });
@@ -213,7 +274,7 @@ function bindEvents() {
     savePrefs({ layoutMode: els.layoutMode.value });
   });
   els.graphLimit.addEventListener("change", () => {
-    savePrefs({ graphLimit: els.graphLimit.value });
+    savePrefs({ graphLimit: els.graphLimit.value as unknown as number | "all" });
     void loadGraph();
   });
   els.graphFamily.addEventListener("change", () => {
@@ -237,7 +298,7 @@ function bindEvents() {
   els.globalSymbolSearch.addEventListener("focus", () => void searchSymbols());
   els.searchLabelFilter.addEventListener("change", () => void searchSymbols());
   document.addEventListener("mousedown", (event) => {
-    if (!els.headerSearch.contains(event.target)) showSearchResults(false);
+    if (!els.headerSearch.contains(event.target as Node)) showSearchResults(false);
   });
   els.breadcrumbClear.addEventListener("click", () => clearSelection());
   els.detailsTabSelection.addEventListener("click", () => setDetailsTab("selection"));
@@ -290,17 +351,17 @@ function bindEvents() {
   els.traceDialog.addEventListener("click", (event) => {
     if (event.target === els.traceDialog) toggleTrace(false);
   });
-  els.traceDialog.querySelectorAll("[data-trace-mode]").forEach((button) => {
+  els.traceDialog.querySelectorAll<HTMLButtonElement>("[data-trace-mode]").forEach((button) => {
     button.addEventListener("click", () => {
       if (!state.trace.symbol) return;
-      state.trace.mode = button.dataset.traceMode;
+      state.trace.mode = button.dataset.traceMode as TraceMode;
       setTraceModeButtons(state.trace.mode);
       void fetchTrace();
     });
   });
   els.traceDirection.addEventListener("change", () => {
     if (!state.trace.symbol) return;
-    state.trace.direction = els.traceDirection.value;
+    state.trace.direction = els.traceDirection.value as TraceDirection;
     void fetchTrace();
   });
   els.traceDepth.addEventListener("change", () => {
@@ -321,19 +382,19 @@ function bindEvents() {
   window.addEventListener("keydown", handleGlobalKeydown);
 }
 
-function showSearchResults(show) {
+function showSearchResults(show: boolean): void {
   els.globalSearchResults.hidden = !show;
 }
 
-function toggleShortcuts(show) {
+function toggleShortcuts(show: boolean): void {
   els.shortcutsHelp.hidden = !show;
 }
 
-function toggleTrace(show) {
+function toggleTrace(show: boolean): void {
   els.traceDialog.hidden = !show;
 }
 
-async function openTrace(symbol, label) {
+async function openTrace(symbol: string, label: string): Promise<void> {
   if (!state.activeProject || !symbol) return;
 
   state.trace = { symbol, label, mode: "calls", direction: "both", depth: 3, includeTests: false };
@@ -346,14 +407,15 @@ async function openTrace(symbol, label) {
   await fetchTrace();
 }
 
-function setTraceModeButtons(mode) {
-  els.traceDialog.querySelectorAll("[data-trace-mode]").forEach((button) => {
+function setTraceModeButtons(mode: TraceMode): void {
+  els.traceDialog.querySelectorAll<HTMLButtonElement>("[data-trace-mode]").forEach((button) => {
     button.classList.toggle("is-active", button.dataset.traceMode === mode);
   });
 }
 
-async function fetchTrace() {
+async function fetchTrace(): Promise<void> {
   const { symbol, mode, direction, depth, includeTests } = state.trace;
+  if (!symbol || !state.activeProject) return;
   els.traceBody.innerHTML = `<p class="empty">Loading trace…</p>`;
 
   try {
@@ -364,20 +426,18 @@ async function fetchTrace() {
       depth: String(depth),
       include_tests: String(includeTests)
     });
-    const data = await getJson(
-      `/api/projects/${encodeURIComponent(state.activeProject)}/trace?${params}`
-    );
+    const data = await getJson<TraceResult>(`/api/projects/${encodeURIComponent(state.activeProject)}/trace?${params}`);
     renderTrace(data);
   } catch (error) {
     els.traceBody.innerHTML = `<p class="empty is-error">${escapeHtml(errorMessage(error))}</p>`;
   }
 }
 
-function renderTrace(data) {
+function renderTrace(data: TraceResult): void {
   const callers = Array.isArray(data.callers) ? data.callers : [];
   const callees = Array.isArray(data.callees) ? data.callees : [];
 
-  const renderHops = (rows) =>
+  const renderHops = (rows: typeof callers) =>
     rows.length
       ? rows
           .map(
@@ -404,9 +464,19 @@ function renderTrace(data) {
   `;
 }
 
-const INSIGHT_PANEL_KEYS = ["composition", "architecture", "perf", "duplicates", "impact", "crossRepo"];
+const INSIGHT_PANEL_KEYS = ["composition", "architecture", "perf", "duplicates", "impact", "crossRepo"] as const;
+type InsightKey = (typeof INSIGHT_PANEL_KEYS)[number];
 
-function setDetailsTab(tab) {
+const insightPanelEls: Record<InsightKey, { toggle: HTMLButtonElement; panel: HTMLElement }> = {
+  composition: { toggle: els.compositionToggle, panel: els.compositionPanel },
+  architecture: { toggle: els.architectureToggle, panel: els.architecturePanel },
+  perf: { toggle: els.perfToggle, panel: els.perfPanel },
+  duplicates: { toggle: els.duplicatesToggle, panel: els.duplicatesPanel },
+  impact: { toggle: els.impactToggle, panel: els.impactPanel },
+  crossRepo: { toggle: els.crossRepoToggle, panel: els.crossRepoPanel }
+};
+
+function setDetailsTab(tab: "selection" | "insights"): void {
   const isSelection = tab === "selection";
   els.detailsTabSelection.classList.toggle("is-active", isSelection);
   els.detailsTabSelection.setAttribute("aria-selected", String(isSelection));
@@ -416,21 +486,23 @@ function setDetailsTab(tab) {
   els.insightsTabPanel.hidden = isSelection;
 }
 
-function closeInsightPanel(key) {
-  els[`${key}Panel`].hidden = true;
-  els[`${key}Toggle`].classList.remove("is-open");
-  els[`${key}Toggle`].setAttribute("aria-expanded", "false");
+function closeInsightPanel(key: InsightKey): void {
+  const { toggle, panel } = insightPanelEls[key];
+  panel.hidden = true;
+  toggle.classList.remove("is-open");
+  toggle.setAttribute("aria-expanded", "false");
 }
 
-function openInsightPanel(key) {
+function openInsightPanel(key: InsightKey): void {
   INSIGHT_PANEL_KEYS.filter((other) => other !== key).forEach(closeInsightPanel);
-  els[`${key}Panel`].hidden = false;
-  els[`${key}Toggle`].classList.add("is-open");
-  els[`${key}Toggle`].setAttribute("aria-expanded", "true");
+  const { toggle, panel } = insightPanelEls[key];
+  panel.hidden = false;
+  toggle.classList.add("is-open");
+  toggle.setAttribute("aria-expanded", "true");
 }
 
-function toggleInsightPanel(key, onFirstOpen) {
-  if (els[`${key}Panel`].hidden) {
+function toggleInsightPanel(key: InsightKey, onFirstOpen?: () => void): void {
+  if (insightPanelEls[key].panel.hidden) {
     openInsightPanel(key);
     onFirstOpen?.();
   } else {
@@ -438,7 +510,7 @@ function toggleInsightPanel(key, onFirstOpen) {
   }
 }
 
-async function loadApiSurface() {
+async function loadApiSurface(): Promise<void> {
   if (!state.activeProject) return;
 
   els.apiSurfaceStatus.hidden = false;
@@ -447,7 +519,9 @@ async function loadApiSurface() {
   els.apiSurface.hidden = true;
 
   try {
-    const data = await getJson(`/api/projects/${encodeURIComponent(state.activeProject)}/api-surface`);
+    const data = await getJson<{ results: Array<{ urlPath: string; callers: Array<{ name: string }> }> }>(
+      `/api/projects/${encodeURIComponent(state.activeProject)}/api-surface`
+    );
     state.apiSurface = data.results;
     els.apiSurface.innerHTML = data.results.length
       ? data.results
@@ -472,7 +546,7 @@ async function loadApiSurface() {
   }
 }
 
-async function loadConfigMap() {
+async function loadConfigMap(): Promise<void> {
   if (!state.activeProject) return;
 
   els.configMapStatus.hidden = false;
@@ -481,7 +555,10 @@ async function loadConfigMap() {
   els.configMap.hidden = true;
 
   try {
-    const data = await getJson(`/api/projects/${encodeURIComponent(state.activeProject)}/config-map`);
+    const data = await getJson<{
+      envVars?: Array<{ label: string }>;
+      entries?: Array<{ key: string; configuredBy: Array<{ name: string }> }>;
+    }>(`/api/projects/${encodeURIComponent(state.activeProject)}/config-map`);
     state.configMap = data;
 
     const envRows = (data.envVars ?? [])
@@ -517,12 +594,12 @@ async function loadConfigMap() {
   }
 }
 
-async function loadIndexHealth() {
+async function loadIndexHealth(): Promise<void> {
   if (!state.activeProject) return;
 
   els.indexHealth.textContent = "";
   try {
-    const data = await getJson(`/api/projects/${encodeURIComponent(state.activeProject)}/index-health`);
+    const data = await getJson<IndexHealth>(`/api/projects/${encodeURIComponent(state.activeProject)}/index-health`);
     const parts = [`Embeddings: ${data.hasEmbeddings ? "Yes" : "No"}`];
     if (data.status) parts.push(`Index: ${data.status}`);
     els.indexHealth.textContent = parts.join(" · ");
@@ -531,7 +608,7 @@ async function loadIndexHealth() {
   }
 }
 
-async function loadChurn() {
+async function loadChurn(): Promise<void> {
   if (!state.activeProject) return;
 
   els.churnStatus.hidden = false;
@@ -540,7 +617,7 @@ async function loadChurn() {
   els.churnList.hidden = true;
 
   try {
-    const data = await getJson(`/api/projects/${encodeURIComponent(state.activeProject)}/churn`);
+    const data = await getJson<{ results: FileChurn[] }>(`/api/projects/${encodeURIComponent(state.activeProject)}/churn`);
     state.churn = data.results;
     els.churnList.innerHTML = data.results.length
       ? data.results
@@ -564,7 +641,7 @@ async function loadChurn() {
   }
 }
 
-async function loadArchitecture() {
+async function loadArchitecture(): Promise<void> {
   if (!state.activeProject) return;
 
   els.architectureStatus.hidden = false;
@@ -573,7 +650,9 @@ async function loadArchitecture() {
   els.architectureBody.hidden = true;
 
   try {
-    const data = await getJson(`/api/projects/${encodeURIComponent(state.activeProject)}/architecture`);
+    const data = await getJson<ArchitectureInsights>(
+      `/api/projects/${encodeURIComponent(state.activeProject)}/architecture`
+    );
     state.architecture = data;
     renderArchitecture(data);
     els.architectureStatus.hidden = true;
@@ -584,7 +663,7 @@ async function loadArchitecture() {
   }
 }
 
-function renderArchitecture(data) {
+function renderArchitecture(data: ArchitectureInsights): void {
   const layers = Array.isArray(data.layers) ? data.layers : [];
   els.archLayers.innerHTML = layers.length
     ? layers
@@ -612,7 +691,7 @@ function renderArchitecture(data) {
         )
         .join("")
     : `<p class="empty">No hotspots found.</p>`;
-  els.archHotspots.querySelectorAll("[data-hotspot-index]").forEach((button) => {
+  els.archHotspots.querySelectorAll<HTMLButtonElement>("[data-hotspot-index]").forEach((button) => {
     button.addEventListener("click", () => {
       const row = hotspots[Number(button.dataset.hotspotIndex)];
       if (row?.qualified_name) void openTrace(row.qualified_name, row.name);
@@ -650,7 +729,7 @@ function renderArchitecture(data) {
     : `<p class="empty">No clusters found.</p>`;
 }
 
-async function loadPerfRisks() {
+async function loadPerfRisks(): Promise<void> {
   if (!state.activeProject) return;
 
   els.perfStatus.hidden = false;
@@ -659,7 +738,7 @@ async function loadPerfRisks() {
   els.perfList.hidden = true;
 
   try {
-    const data = await getJson(`/api/projects/${encodeURIComponent(state.activeProject)}/perf-risks`);
+    const data = await getJson<{ results: PerfRisk[] }>(`/api/projects/${encodeURIComponent(state.activeProject)}/perf-risks`);
     state.perf = data.results;
     renderPerfRisks(data.results);
     els.perfStatus.hidden = true;
@@ -670,7 +749,7 @@ async function loadPerfRisks() {
   }
 }
 
-function perfRiskChips(meta) {
+function perfRiskChips(meta: SymbolMeta): string {
   return [
     meta.transitiveLoopDepth ? `<span class="chip">loop depth ${formatNumber(meta.transitiveLoopDepth)}</span>` : "",
     meta.linearScanInLoop ? `<span class="chip">linear scan in loop</span>` : "",
@@ -679,7 +758,7 @@ function perfRiskChips(meta) {
   ].join("");
 }
 
-function renderPerfRisks(risks) {
+function renderPerfRisks(risks: PerfRisk[]): void {
   els.perfList.innerHTML = risks.length
     ? risks
         .map(
@@ -697,7 +776,7 @@ function renderPerfRisks(risks) {
         .join("")
     : `<p class="empty">No perf risks found.</p>`;
 
-  els.perfList.querySelectorAll("[data-perf-trace]").forEach((button) => {
+  els.perfList.querySelectorAll<HTMLButtonElement>("[data-perf-trace]").forEach((button) => {
     button.addEventListener("click", () => {
       const risk = risks[Number(button.dataset.perfTrace)];
       if (risk) void openTrace(risk.qualifiedName, risk.label);
@@ -705,7 +784,7 @@ function renderPerfRisks(risks) {
   });
 }
 
-async function loadDuplicates() {
+async function loadDuplicates(): Promise<void> {
   if (!state.activeProject) return;
 
   els.duplicatesStatus.hidden = false;
@@ -714,7 +793,9 @@ async function loadDuplicates() {
   els.duplicatesList.hidden = true;
 
   try {
-    const data = await getJson(`/api/projects/${encodeURIComponent(state.activeProject)}/duplicates`);
+    const data = await getJson<{ results: DuplicatePair[] }>(
+      `/api/projects/${encodeURIComponent(state.activeProject)}/duplicates`
+    );
     state.duplicates = data.results;
     renderDuplicates(data.results);
     els.duplicatesStatus.hidden = true;
@@ -725,7 +806,7 @@ async function loadDuplicates() {
   }
 }
 
-function renderDuplicates(pairs) {
+function renderDuplicates(pairs: DuplicatePair[]): void {
   els.duplicatesList.innerHTML = pairs.length
     ? pairs
         .map(
@@ -746,7 +827,7 @@ function renderDuplicates(pairs) {
     : `<p class="empty">No similar code pairs found.</p>`;
 }
 
-async function loadImpact() {
+async function loadImpact(): Promise<void> {
   if (!state.activeProject) return;
 
   els.impactStatus.hidden = false;
@@ -755,7 +836,7 @@ async function loadImpact() {
   els.impactBody.hidden = true;
 
   try {
-    const data = await getJson(`/api/projects/${encodeURIComponent(state.activeProject)}/impact`);
+    const data = await getJson<ImpactResult>(`/api/projects/${encodeURIComponent(state.activeProject)}/impact`);
     state.impact = data;
     renderImpact(data);
     els.impactStatus.hidden = true;
@@ -766,13 +847,13 @@ async function loadImpact() {
   }
 }
 
-function renderImpact(data) {
+function renderImpact(data: ImpactResult): void {
   const files = Array.isArray(data.changed_files) ? data.changed_files : [];
   els.impactFiles.innerHTML = files.length
     ? files.map((file) => `<div class="arch-item"><span class="arch-item-name">${escapeHtml(file)}</span></div>`).join("")
     : `<p class="empty">No uncommitted changes detected.</p>`;
 
-  const symbols = Array.isArray(data.impacted_symbols) ? data.impacted_symbols : [];
+  const symbols: ImpactedSymbol[] = Array.isArray(data.impacted_symbols) ? data.impacted_symbols : [];
   els.impactSymbols.innerHTML = symbols.length
     ? symbols
         .map((symbol) =>
@@ -780,7 +861,7 @@ function renderImpact(data) {
           // as the id anyway lets Trace/Copy work on a best-effort basis (trace_path also
           // accepts short names), at the cost of "Related code" not resolving for these rows.
           symbolRowHtml(
-            { label: symbol.name, kind: symbol.label, file: symbol.file, qualifiedName: symbol.name },
+            { id: symbol.name, label: symbol.name, kind: symbol.label, file: symbol.file, qualifiedName: symbol.name },
             `${escapeHtml(symbol.label)} · ${escapeHtml(symbol.file ?? "")}`
           )
         )
@@ -789,12 +870,12 @@ function renderImpact(data) {
   wireSymbolRows(els.impactSymbols);
 }
 
-async function loadCrossRepoProjectList() {
+async function loadCrossRepoProjectList(): Promise<void> {
   if (!state.activeProject) return;
 
   els.crossRepoProjects.innerHTML = `<p class="empty">Loading projects…</p>`;
   try {
-    const data = await getJson("/api/projects");
+    const data = await getJson<ProjectsResponse>("/api/projects");
     const others = (data.projects ?? []).filter((entry) => entry.project !== state.activeProject);
     state.crossRepoProjects = others;
     els.crossRepoProjects.innerHTML = others.length
@@ -814,10 +895,12 @@ async function loadCrossRepoProjectList() {
   }
 }
 
-async function runCrossRepo() {
+async function runCrossRepo(): Promise<void> {
   if (!state.activeProject) return;
 
-  const targetProjects = [...els.crossRepoProjects.querySelectorAll("input:checked")].map((input) => input.value);
+  const targetProjects = [...els.crossRepoProjects.querySelectorAll<HTMLInputElement>("input:checked")].map(
+    (input) => input.value
+  );
   if (!targetProjects.length) {
     els.crossRepoStatus.classList.add("is-error");
     els.crossRepoStatus.textContent = "Select at least one project.";
@@ -830,7 +913,7 @@ async function runCrossRepo() {
   els.crossRepoList.hidden = true;
 
   try {
-    const data = await postJson(`/api/projects/${encodeURIComponent(state.activeProject)}/cross-repo`, {
+    const data = await postJson<CrossRepoResponse>(`/api/projects/${encodeURIComponent(state.activeProject)}/cross-repo`, {
       targetProjects
     });
     renderCrossRepoLinks(data);
@@ -840,9 +923,9 @@ async function runCrossRepo() {
   }
 }
 
-function renderCrossRepoLinks(data) {
+function renderCrossRepoLinks(data: CrossRepoResponse): void {
   const summary = data.summary;
-  const links = Array.isArray(data.links) ? data.links : [];
+  const links: CrossRepoLink[] = Array.isArray(data.links) ? data.links : [];
 
   const summaryLine = summary
     ? `Scanned ${formatNumber(summary.projects_scanned ?? 0)} projects · ${formatNumber(summary.total_cross_edges ?? 0)} cross-repo links found`
@@ -866,11 +949,11 @@ function renderCrossRepoLinks(data) {
   els.crossRepoList.hidden = false;
 }
 
-function toggleAdr(show) {
+function toggleAdr(show: boolean): void {
   els.adrDialog.hidden = !show;
 }
 
-async function openAdr() {
+async function openAdr(): Promise<void> {
   if (!state.activeProject) return;
 
   els.adrTextarea.value = "";
@@ -880,7 +963,7 @@ async function openAdr() {
   toggleAdr(true);
 
   try {
-    const data = await getJson(`/api/projects/${encodeURIComponent(state.activeProject)}/adr`);
+    const data = await getJson<AdrResult>(`/api/projects/${encodeURIComponent(state.activeProject)}/adr`);
     els.adrTextarea.value = data.content ?? "";
     if (!data.content && data.adr_hint) {
       els.adrHint.hidden = false;
@@ -893,7 +976,7 @@ async function openAdr() {
   }
 }
 
-async function saveAdr() {
+async function saveAdr(): Promise<void> {
   if (!state.activeProject) return;
 
   els.adrSaveStatus.textContent = "Saving…";
@@ -911,12 +994,12 @@ async function saveAdr() {
   }
 }
 
-function toggleQuery(show) {
+function toggleQuery(show: boolean): void {
   els.queryDialog.hidden = !show;
   if (show) els.queryTextarea.focus();
 }
 
-async function runQuery() {
+async function runQuery(): Promise<void> {
   if (!state.activeProject) return;
 
   const query = els.queryTextarea.value.trim();
@@ -927,7 +1010,7 @@ async function runQuery() {
   els.queryResults.innerHTML = "";
 
   try {
-    const data = await postJson(`/api/projects/${encodeURIComponent(state.activeProject)}/query`, { query });
+    const data = await postJson<QueryResult>(`/api/projects/${encodeURIComponent(state.activeProject)}/query`, { query });
     els.queryStatus.textContent = `${formatNumber(data.total ?? (data.rows ?? []).length)} rows`;
     renderQueryResults(data);
   } catch (error) {
@@ -936,7 +1019,7 @@ async function runQuery() {
   }
 }
 
-function renderQueryResults(data) {
+function renderQueryResults(data: QueryResult): void {
   const columns = Array.isArray(data.columns) ? data.columns : [];
   const rows = Array.isArray(data.rows) ? data.rows : [];
 
@@ -953,7 +1036,10 @@ function renderQueryResults(data) {
       <tbody>
         ${rows
           .map(
-            (row) => `<tr>${row.map((cell) => `<td title="${escapeHtml(String(cell ?? ""))}">${escapeHtml(String(cell ?? ""))}</td>`).join("")}</tr>`
+            (row) =>
+              `<tr>${(row as unknown[])
+                .map((cell) => `<td title="${escapeHtml(String(cell ?? ""))}">${escapeHtml(String(cell ?? ""))}</td>`)
+                .join("")}</tr>`
           )
           .join("")}
       </tbody>
@@ -961,25 +1047,24 @@ function renderQueryResults(data) {
   `;
 }
 
-function setSizeMode(mode) {
+function setSizeMode(mode: "count" | "degree"): void {
   graph.setSizeMode(mode);
   savePrefs({ sizeBy: mode });
   els.sizeByCount.classList.toggle("is-active", mode === "count");
   els.sizeByDegree.classList.toggle("is-active", mode === "degree");
 }
 
-function toggleIsolate() {
+function toggleIsolate(): void {
   state.isolate = !state.isolate;
   graph.setIsolate(state.isolate);
   els.isolateButton.classList.toggle("is-toggled", state.isolate);
   if (state.isolate && state.selectedNode) graph.centerOn(state.selectedNode);
 }
 
-function handleGlobalKeydown(event) {
+function handleGlobalKeydown(event: KeyboardEvent): void {
   const target = event.target;
   const isTyping =
-    target instanceof HTMLElement &&
-    (target.matches("input, textarea, select") || target.isContentEditable);
+    target instanceof HTMLElement && (target.matches("input, textarea, select") || target.isContentEditable);
 
   if (event.key === "Escape") {
     if (!els.traceDialog.hidden) {
@@ -1000,11 +1085,11 @@ function handleGlobalKeydown(event) {
     }
     if (target === els.globalSymbolSearch) {
       showSearchResults(false);
-      target.blur();
+      els.globalSymbolSearch.blur();
       return;
     }
     if (isTyping) {
-      target.blur();
+      (target as HTMLElement).blur();
       return;
     }
     clearSelection();
@@ -1031,7 +1116,7 @@ function handleGlobalKeydown(event) {
   }
 
   if (event.key === "r" || event.key === "R") {
-    loadActiveProject();
+    void loadActiveProject();
     return;
   }
 
@@ -1040,7 +1125,7 @@ function handleGlobalKeydown(event) {
   }
 }
 
-function showHome() {
+function showHome(): void {
   els.workspaceView.hidden = true;
   els.homeView.hidden = false;
   els.headerSearch.hidden = true;
@@ -1050,7 +1135,7 @@ function showHome() {
   renderProjectGrid();
 }
 
-function showWorkspace() {
+function showWorkspace(): void {
   els.homeView.hidden = true;
   els.workspaceView.hidden = false;
   els.headerSearch.hidden = false;
@@ -1058,11 +1143,11 @@ function showWorkspace() {
   els.queryButton.hidden = false;
 }
 
-async function loadProjects() {
+async function loadProjects(): Promise<void> {
   els.projectGrid.innerHTML = renderSkeletonCards(6);
 
   try {
-    const data = await getJson("/api/projects");
+    const data = await getJson<ProjectsResponse>("/api/projects");
     state.projects = data.projects;
     renderProjectGrid();
 
@@ -1077,23 +1162,26 @@ async function loadProjects() {
         <button class="icon-button" id="projectListRetry" type="button">Retry</button>
       </div>
     `;
-    document.querySelector("#projectListRetry")?.addEventListener("click", () => loadProjects());
+    document.querySelector("#projectListRetry")?.addEventListener("click", () => void loadProjects());
   }
 }
 
-function renderSkeletonCards(count) {
+function renderSkeletonCards(count: number): string {
   return Array.from({ length: count }, () => `<div class="skeleton-card"></div>`).join("");
 }
 
-function buildProjectGroups(projects) {
-  const groups = new Map();
+type ProjectGroupItem = { project: CachedProject; pretty: string; suffix: string | null };
+type ProjectGroup = { key: string; items: ProjectGroupItem[] };
+
+function buildProjectGroups(projects: CachedProject[]): ProjectGroup[] {
+  const groups = new Map<string, ProjectGroupItem[]>();
   for (const project of projects) {
     const pretty = prettyName(project.project);
     const sepIndex = pretty.indexOf(" / ");
     const key = sepIndex === -1 ? pretty : pretty.slice(0, sepIndex);
     const suffix = sepIndex === -1 ? null : pretty.slice(sepIndex + 3);
     if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push({ project, pretty, suffix });
+    groups.get(key)!.push({ project, pretty, suffix });
   }
 
   for (const items of groups.values()) {
@@ -1107,13 +1195,13 @@ function buildProjectGroups(projects) {
   return [...groups.entries()].map(([key, items]) => ({ key, items }));
 }
 
-function sortProjects(projects) {
+function sortProjects(projects: CachedProject[]): CachedProject[] {
   const sorted = [...projects];
   if (state.projectSort === "name") {
     sorted.sort((a, b) => prettyName(a.project).localeCompare(prettyName(b.project)));
   } else if (state.projectSort === "recent") {
     const recent = loadPrefs().recentProjects;
-    const rankOf = (project) => {
+    const rankOf = (project: CachedProject) => {
       const index = recent.indexOf(project.project);
       return index === -1 ? Infinity : index;
     };
@@ -1124,7 +1212,7 @@ function sortProjects(projects) {
   return sorted;
 }
 
-function renderProjectGrid() {
+function renderProjectGrid(): void {
   const filter = els.projectSearch.value.trim().toLowerCase();
   const projects = sortProjects(state.projects).filter((project) =>
     `${project.project} ${project.root_path}`.toLowerCase().includes(filter)
@@ -1144,10 +1232,10 @@ function renderProjectGrid() {
   }
 }
 
-function renderRecentProjects(filterActive) {
+function renderRecentProjects(filterActive: boolean): void {
   const recentNames = loadPrefs().recentProjects;
   const projectByName = new Map(state.projects.map((project) => [project.project, project]));
-  const recents = recentNames.map((name) => projectByName.get(name)).filter(Boolean);
+  const recents = recentNames.map((name) => projectByName.get(name)).filter((project): project is CachedProject => Boolean(project));
 
   if (filterActive || !recents.length) {
     els.recentProjects.hidden = true;
@@ -1161,7 +1249,7 @@ function renderRecentProjects(filterActive) {
   }
 }
 
-function renderRecentCard(project) {
+function renderRecentCard(project: CachedProject): HTMLButtonElement {
   const card = document.createElement("button");
   card.type = "button";
   card.className = `project-card recent-card ${project.project === state.activeProject ? "is-active" : ""}`;
@@ -1171,13 +1259,13 @@ function renderRecentCard(project) {
     </header>
     <p class="project-card-meta">${formatNumber(project.nodes)} nodes · ${formatNumber(project.edges)} edges</p>
   `;
-  card.addEventListener("click", () => selectProject(project.project, { restoreFilters: true }));
+  card.addEventListener("click", () => void selectProject(project.project, { restoreFilters: true }));
   return card;
 }
 
 const EXCLUDE_OPEN_SELECTOR = ".project-card-branch, .project-card-more, .project-card-delete";
 
-function renderProjectCard(group, forceExpand) {
+function renderProjectCard(group: ProjectGroup, forceExpand: boolean): HTMLElement {
   const isActive = group.items.some((item) => item.project.project === state.activeProject);
   const primary = group.items.find((item) => item.suffix === null) ?? group.items[0];
   const totalNodes = group.items.reduce((sum, item) => sum + item.project.nodes, 0);
@@ -1206,13 +1294,13 @@ function renderProjectCard(group, forceExpand) {
     </p>
   `;
 
-  const open = () => selectProject(primary.project.project, { restoreFilters: true });
+  const open = () => void selectProject(primary.project.project, { restoreFilters: true });
   card.addEventListener("click", (event) => {
-    if (event.target.closest(EXCLUDE_OPEN_SELECTOR)) return;
+    if ((event.target as HTMLElement).closest(EXCLUDE_OPEN_SELECTOR)) return;
     open();
   });
   card.addEventListener("keydown", (event) => {
-    if ((event.key === "Enter" || event.key === " ") && !event.target.closest(EXCLUDE_OPEN_SELECTOR)) {
+    if ((event.key === "Enter" || event.key === " ") && !(event.target as HTMLElement).closest(EXCLUDE_OPEN_SELECTOR)) {
       event.preventDefault();
       open();
     }
@@ -1250,7 +1338,7 @@ function renderProjectCard(group, forceExpand) {
   return card;
 }
 
-function renderBranchRow(item) {
+function renderBranchRow(item: ProjectGroupItem): HTMLDivElement {
   const row = document.createElement("div");
   row.className = `project-card-branch ${item.project.project === state.activeProject ? "is-active" : ""}`;
   row.setAttribute("role", "button");
@@ -1268,24 +1356,24 @@ function renderBranchRow(item) {
     <button type="button" class="project-card-delete" title="Remove from cache" aria-label="Remove from cache">Remove</button>
   `;
   row.addEventListener("click", (event) => {
-    if (event.target.closest(".project-card-delete")) return;
+    if ((event.target as HTMLElement).closest(".project-card-delete")) return;
     event.stopPropagation();
-    selectProject(item.project.project, { restoreFilters: true });
+    void selectProject(item.project.project, { restoreFilters: true });
   });
   row.addEventListener("keydown", (event) => {
-    if ((event.key === "Enter" || event.key === " ") && !event.target.closest(".project-card-delete")) {
+    if ((event.key === "Enter" || event.key === " ") && !(event.target as HTMLElement).closest(".project-card-delete")) {
       event.preventDefault();
-      selectProject(item.project.project, { restoreFilters: true });
+      void selectProject(item.project.project, { restoreFilters: true });
     }
   });
-  row.querySelector(".project-card-delete").addEventListener("click", (event) => {
+  row.querySelector(".project-card-delete")!.addEventListener("click", (event) => {
     event.stopPropagation();
     void deleteProjectFlow(item.project.project, item.suffix ?? "main");
   });
   return row;
 }
 
-async function deleteProjectFlow(projectName, displayName) {
+async function deleteProjectFlow(projectName: string, displayName: string): Promise<void> {
   const confirmed = window.confirm(`Remove "${displayName}" from the cache? This cannot be undone.`);
   if (!confirmed) return;
 
@@ -1302,13 +1390,13 @@ async function deleteProjectFlow(projectName, displayName) {
   renderProjectGrid();
 }
 
-function pushRecent(projectName) {
+function pushRecent(projectName: string): void {
   const prefs = loadPrefs();
   const next = [projectName, ...prefs.recentProjects.filter((name) => name !== projectName)].slice(0, 6);
   savePrefs({ recentProjects: next });
 }
 
-async function selectProject(projectName, { restoreFilters = false } = {}) {
+async function selectProject(projectName: string, { restoreFilters = false }: { restoreFilters?: boolean } = {}): Promise<void> {
   state.activeProject = projectName;
   state.selectedNode = null;
   state.selectedEdge = null;
@@ -1319,20 +1407,20 @@ async function selectProject(projectName, { restoreFilters = false } = {}) {
   await loadActiveProject({ restoreFilters });
 }
 
-function graphQueryString() {
+function graphQueryString(): string {
   const params = new URLSearchParams({ limit: els.graphLimit.value, mode: state.graphMode });
   if (els.graphFamily.value) params.set("family", els.graphFamily.value);
   return params.toString();
 }
 
-function applyGraphMode(mode) {
+function applyGraphMode(mode: "packages" | "symbols"): void {
   state.graphMode = mode;
   els.graphModePackages.classList.toggle("is-active", mode === "packages");
   els.graphModeSymbols.classList.toggle("is-active", mode === "symbols");
 
   // Tree's "nearest existing ancestor" nesting relies on real package/folder nodes to
   // walk up to - there are none in Symbols mode, so it has nothing to nest against.
-  const treeOption = els.layoutMode.querySelector('option[value="tree"]');
+  const treeOption = els.layoutMode.querySelector<HTMLOptionElement>('option[value="tree"]')!;
   treeOption.disabled = mode === "symbols";
   if (mode === "symbols" && els.layoutMode.value === "tree") {
     els.layoutMode.value = "clustered";
@@ -1341,25 +1429,25 @@ function applyGraphMode(mode) {
   }
 }
 
-function setGraphMode(mode) {
+function setGraphMode(mode: "packages" | "symbols"): void {
   applyGraphMode(mode);
   savePrefs({ graphMode: mode });
   void loadGraph();
 }
 
-async function loadActiveProject({ restoreFilters = false } = {}) {
+async function loadActiveProject({ restoreFilters = false }: { restoreFilters?: boolean } = {}): Promise<void> {
   if (!state.activeProject) return;
 
   setGraphStatus("loading");
   els.graphFamily.value = "";
   els.graphLimit.disabled = false;
 
-  let summary;
-  let graphData;
+  let summary: ProjectSummary;
+  let graphData: GraphResponse;
   try {
     [summary, graphData] = await Promise.all([
-      getJson(`/api/projects/${encodeURIComponent(state.activeProject)}/summary`),
-      getJson(`/api/projects/${encodeURIComponent(state.activeProject)}/graph?${graphQueryString()}`)
+      getJson<ProjectSummary>(`/api/projects/${encodeURIComponent(state.activeProject)}/summary`),
+      getJson<GraphResponse>(`/api/projects/${encodeURIComponent(state.activeProject)}/graph?${graphQueryString()}`)
     ]);
   } catch (error) {
     setGraphStatus("error", errorMessage(error));
@@ -1405,14 +1493,14 @@ async function loadActiveProject({ restoreFilters = false } = {}) {
   showSearchResults(false);
 }
 
-async function loadGraph() {
+async function loadGraph(): Promise<void> {
   if (!state.activeProject) return;
 
   setGraphStatus("loading");
 
-  let graphData;
+  let graphData: GraphResponse;
   try {
-    graphData = await getJson(
+    graphData = await getJson<GraphResponse>(
       `/api/projects/${encodeURIComponent(state.activeProject)}/graph?${graphQueryString()}`
     );
   } catch (error) {
@@ -1435,7 +1523,9 @@ async function loadGraph() {
   renderEmptyInspector();
 }
 
-function setGraphStatus(mode, message) {
+type GraphStatusMode = "loading" | "error" | "empty" | "ready";
+
+function setGraphStatus(mode: GraphStatusMode, message?: string): void {
   const el = els.graphStatus;
   el.classList.toggle("is-loading", mode === "loading");
   el.classList.toggle("is-error", mode === "error");
@@ -1448,8 +1538,9 @@ function setGraphStatus(mode, message) {
   else if (mode === "empty") els.graphStatusMessage.textContent = "No graph data for this project.";
 }
 
-function renderSummary() {
+function renderSummary(): void {
   const summary = state.summary;
+  if (!summary) return;
   els.projectTitle.textContent = prettyName(summary.project);
   els.nodesMetric.textContent = formatNumber(summary.total_nodes);
   els.edgesMetric.textContent = formatNumber(summary.total_edges);
@@ -1461,9 +1552,7 @@ function renderSummary() {
     families.map((family) => `<option value="${escapeHtml(family)}">${escapeHtml(family)}</option>`).join("");
 
   const topPackage = [...summary.packages].sort((a, b) => b.node_count - a.node_count)[0];
-  els.topPackageMetric.textContent = topPackage
-    ? `${topPackage.name} · ${formatNumber(topPackage.node_count)}`
-    : "-";
+  els.topPackageMetric.textContent = topPackage ? `${topPackage.name} · ${formatNumber(topPackage.node_count)}` : "-";
 
   const maxLabel = Math.max(...summary.node_labels.map((row) => row.count), 1);
   els.labelBars.innerHTML = summary.node_labels
@@ -1482,7 +1571,7 @@ function renderSummary() {
     .join("");
 }
 
-function renderEdgeTypeFilters() {
+function renderEdgeTypeFilters(): void {
   const counts = graph.getEdgeTypeCounts();
   const maxCount = Math.max(1, ...state.graph.edges.map((edge) => edge.count));
   els.minWeight.min = "1";
@@ -1506,9 +1595,9 @@ function renderEdgeTypeFilters() {
     )
     .join("");
 
-  els.edgeTypeFilters.querySelectorAll(".filter-chip").forEach((button) => {
+  els.edgeTypeFilters.querySelectorAll<HTMLButtonElement>(".filter-chip").forEach((button) => {
     button.addEventListener("click", () => {
-      const type = button.dataset.type;
+      const type = button.dataset.type!;
       if (state.hiddenEdgeTypes.has(type)) state.hiddenEdgeTypes.delete(type);
       else state.hiddenEdgeTypes.add(type);
       button.classList.toggle("is-off", state.hiddenEdgeTypes.has(type));
@@ -1520,17 +1609,13 @@ function renderEdgeTypeFilters() {
 }
 
 function visibleEdges() {
-  return state.graph.edges.filter(
-    (edge) => !state.hiddenEdgeTypes.has(edge.type) && edge.count >= state.minWeight
-  );
+  return state.graph.edges.filter((edge) => !state.hiddenEdgeTypes.has(edge.type) && edge.count >= state.minWeight);
 }
 
 function relationsSource() {
   if (state.graphMode === "symbols" && state.selectedNode) {
     const id = state.selectedNode.id;
-    return state.graph.edges
-      .filter((edge) => edgeSourceId(edge) === id || edgeTargetId(edge) === id)
-      .slice(0, 14);
+    return state.graph.edges.filter((edge) => edgeSourceId(edge) === id || edgeTargetId(edge) === id).slice(0, 14);
   }
   if (state.selectedNode && state.packageDetails) {
     return state.packageDetails.relations.slice(0, 8);
@@ -1541,15 +1626,15 @@ function relationsSource() {
     .slice(0, 14);
 }
 
-function nodeLabel(id) {
+function nodeLabel(id: string): string {
   return state.graph.nodes.find((node) => node.id === id)?.label ?? id;
 }
 
-function renderRelations() {
+function renderRelations(): void {
   const scoped = Boolean(state.selectedNode && (state.packageDetails || state.graphMode === "symbols"));
   const edges = relationsSource();
 
-  els.relationsTitle.textContent = scoped ? `Relations · ${state.selectedNode.label}` : "Relations";
+  els.relationsTitle.textContent = scoped ? `Relations · ${state.selectedNode!.label}` : "Relations";
   els.relationCount.textContent = `${edges.length} shown`;
 
   if (!edges.length) {
@@ -1560,36 +1645,37 @@ function renderRelations() {
   els.edgeList.innerHTML = edges
     .map(
       (edge, index) => `
-    <button class="edge-row ${edgeKey(edge) === edgeKey(state.selectedEdge) ? "is-active" : ""}" type="button" data-edge-index="${index}" title="${escapeHtml(edge.source)} → ${escapeHtml(edge.target)}">
-      <span class="edge-route">${escapeHtml(nodeLabel(edge.source))} <span>→</span> ${escapeHtml(nodeLabel(edge.target))}</span>
+    <button class="edge-row ${edgeKey(edge as never) === edgeKey(state.selectedEdge as never) ? "is-active" : ""}" type="button" data-edge-index="${index}" title="${escapeHtml(String(edge.source))} → ${escapeHtml(String(edge.target))}">
+      <span class="edge-route">${escapeHtml(nodeLabel(edgeSourceId(edge)))} <span>→</span> ${escapeHtml(nodeLabel(edgeTargetId(edge)))}</span>
       <span class="edge-meta">${escapeHtml(edge.type)} · ${formatNumber(edge.count)}</span>
     </button>
   `
     )
     .join("");
 
-  els.edgeList.querySelectorAll(".edge-row").forEach((button) => {
+  els.edgeList.querySelectorAll<HTMLButtonElement>(".edge-row").forEach((button) => {
     button.addEventListener("click", () => {
       selectEdgeFromList(edges[Number(button.dataset.edgeIndex)]);
     });
   });
 }
 
-function selectEdgeFromList(edge) {
+function selectEdgeFromList(edge: SimEdge): void {
   state.selectedEdge = edge;
-  const node = state.graph.nodes.find((candidate) => candidate.id === edge.source);
+  const sourceId = edgeSourceId(edge);
+  const node = state.graph.nodes.find((candidate) => candidate.id === sourceId);
   if (node) {
-    state.selectedNode = node;
-    graph.focusNode(node);
-    graph.centerOn(node);
-    void selectGraphNode(node);
+    state.selectedNode = node as SimNode;
+    graph.focusNode(node as SimNode);
+    graph.centerOn(node as SimNode);
+    void selectGraphNode(node as SimNode);
   }
   graph.focusEdge(edge);
   renderRelations();
   renderBreadcrumb();
 }
 
-async function selectGraphNode(node) {
+async function selectGraphNode(node: SimNode): Promise<void> {
   setDetailsTab("selection");
   if (state.graphMode === "symbols") {
     selectSymbolNode(node);
@@ -1598,7 +1684,7 @@ async function selectGraphNode(node) {
   }
 }
 
-function selectSymbolNode(node) {
+function selectSymbolNode(node: SimNode): void {
   state.packageDetails = null;
   els.detailTitle.textContent = node.label;
   els.detailSubtitle.textContent = `${node.kind}${node.file ? ` · ${node.file}` : ""}`;
@@ -1607,7 +1693,7 @@ function selectSymbolNode(node) {
   renderRelations();
 }
 
-async function loadPackageDetails(node) {
+async function loadPackageDetails(node: SimNode | null): Promise<void> {
   if (!node || !state.activeProject) {
     renderEmptyInspector();
     return;
@@ -1615,7 +1701,7 @@ async function loadPackageDetails(node) {
 
   state.packageDetails = null;
   try {
-    state.packageDetails = await getJson(
+    state.packageDetails = await getJson<PackageDetails>(
       `/api/projects/${encodeURIComponent(state.activeProject)}/packages/${encodeURIComponent(node.id)}`
     );
     renderInspector();
@@ -1627,7 +1713,7 @@ async function loadPackageDetails(node) {
   }
 }
 
-function renderInspector() {
+function renderInspector(): void {
   const details = state.packageDetails;
   if (!details) {
     renderEmptyInspector();
@@ -1652,13 +1738,13 @@ const TRACEABLE_KINDS = new Set(["Function", "Method", "Route"]);
 const DETAILABLE_KINDS = new Set(["Function", "Method", "Class", "Interface", "Type"]);
 const ROW_INTERACTIVE_SELECTOR = ".copy-btn, .row-action, .symbol-details";
 
-function complexityClass(value) {
+function complexityClass(value: number): string {
   if (value >= 15) return "complexity-hot";
   if (value >= 8) return "complexity-warn";
   return "complexity-calm";
 }
 
-function symbolDetailsBodyHtml(meta) {
+function symbolDetailsBodyHtml(meta: SymbolMeta): string {
   const params = (meta.paramNames ?? [])
     .map((name, index) => `${escapeHtml(name)}${meta.paramTypes?.[index] ? `: ${escapeHtml(meta.paramTypes[index])}` : ""}`)
     .join(", ");
@@ -1675,7 +1761,16 @@ function symbolDetailsBodyHtml(meta) {
   ].join("");
 }
 
-function symbolRowHtml(item, metaText) {
+type SymbolRowItem = {
+  id?: string;
+  label: string;
+  kind: string;
+  file?: string;
+  qualifiedName?: string;
+  meta?: SymbolMeta;
+};
+
+function symbolRowHtml(item: SymbolRowItem, metaText: string): string {
   const qualified = item.qualifiedName ?? "";
   const meta = item.meta ?? {};
   const title = meta.docstring || qualified;
@@ -1737,24 +1832,24 @@ function symbolRowHtml(item, metaText) {
   `;
 }
 
-function wireSymbolRows(container) {
-  container.querySelectorAll(".symbol-row").forEach((row) => {
+function wireSymbolRows(container: ParentNode): void {
+  container.querySelectorAll<HTMLElement>(".symbol-row").forEach((row) => {
     row.addEventListener("click", (event) => {
-      if (event.target.closest(ROW_INTERACTIVE_SELECTOR)) return;
-      selectPackageByName(row.dataset.package);
+      if ((event.target as HTMLElement).closest(ROW_INTERACTIVE_SELECTOR)) return;
+      selectPackageByName(row.dataset.package!);
     });
     row.addEventListener("keydown", (event) => {
-      if ((event.key === "Enter" || event.key === " ") && !event.target.closest(ROW_INTERACTIVE_SELECTOR)) {
+      if ((event.key === "Enter" || event.key === " ") && !(event.target as HTMLElement).closest(ROW_INTERACTIVE_SELECTOR)) {
         event.preventDefault();
-        selectPackageByName(row.dataset.package);
+        selectPackageByName(row.dataset.package!);
       }
     });
   });
 
-  container.querySelectorAll(".details-toggle").forEach((button) => {
+  container.querySelectorAll<HTMLButtonElement>(".details-toggle").forEach((button) => {
     button.addEventListener("click", (event) => {
       event.stopPropagation();
-      const details = button.closest(".symbol-row").querySelector(".symbol-details");
+      const details = button.closest(".symbol-row")!.querySelector<HTMLElement>(".symbol-details")!;
       const next = details.hidden;
       details.hidden = !next;
       button.setAttribute("aria-expanded", String(next));
@@ -1765,29 +1860,29 @@ function wireSymbolRows(container) {
     });
   });
 
-  container.querySelectorAll(".copy-btn").forEach((button) => {
+  container.querySelectorAll<HTMLButtonElement>(".copy-btn").forEach((button) => {
     button.addEventListener("click", (event) => {
       event.stopPropagation();
-      void copyToClipboard(button.dataset.copy, button);
+      void copyToClipboard(button.dataset.copy!, button);
     });
   });
 
-  container.querySelectorAll(".row-action[data-trace]").forEach((button) => {
+  container.querySelectorAll<HTMLButtonElement>(".row-action[data-trace]").forEach((button) => {
     button.addEventListener("click", (event) => {
       event.stopPropagation();
-      void openTrace(button.dataset.trace, button.dataset.traceLabel);
+      void openTrace(button.dataset.trace!, button.dataset.traceLabel!);
     });
   });
 }
 
-async function loadRelatedSymbols(detailsEl) {
-  const container = detailsEl.querySelector(".related-code");
+async function loadRelatedSymbols(detailsEl: HTMLElement): Promise<void> {
+  const container = detailsEl.querySelector<HTMLElement>(".related-code");
   if (!container || !state.activeProject) return;
 
   container.innerHTML = `<p class="empty">Loading related code…</p>`;
   try {
-    const data = await getJson(
-      `/api/projects/${encodeURIComponent(state.activeProject)}/related?symbol=${encodeURIComponent(detailsEl.dataset.qualified)}`
+    const data = await getJson<{ results: GraphNode[] }>(
+      `/api/projects/${encodeURIComponent(state.activeProject)}/related?symbol=${encodeURIComponent(detailsEl.dataset.qualified ?? "")}`
     );
     container.innerHTML = data.results.length
       ? `<p class="detail-label">Related code</p>` +
@@ -1799,7 +1894,7 @@ async function loadRelatedSymbols(detailsEl) {
   }
 }
 
-async function copyToClipboard(text, button) {
+async function copyToClipboard(text: string, button: HTMLButtonElement): Promise<void> {
   try {
     await navigator.clipboard.writeText(text);
   } catch {
@@ -1814,13 +1909,13 @@ async function copyToClipboard(text, button) {
   }, 1200);
 }
 
-function renderEmptyInspector() {
+function renderEmptyInspector(): void {
   els.detailTitle.textContent = "Select a package";
   els.detailSubtitle.textContent = "Package details, relations, and symbols appear here.";
   els.packageSymbols.innerHTML = "";
 }
 
-async function searchSymbols() {
+async function searchSymbols(): Promise<void> {
   if (!state.activeProject) return;
 
   const q = els.globalSymbolSearch.value.trim();
@@ -1833,8 +1928,8 @@ async function searchSymbols() {
   try {
     const params = new URLSearchParams({ q });
     if (els.searchLabelFilter.value) params.set("label", els.searchLabelFilter.value);
-    const data = await getJson(`/api/projects/${encodeURIComponent(state.activeProject)}/search?${params}`);
-    const renderRow = (result) =>
+    const data = await getJson<SearchResponse>(`/api/projects/${encodeURIComponent(state.activeProject)}/search?${params}`);
+    const renderRow = (result: SearchResult) =>
       symbolRowHtml(
         { ...result, label: `${result.label} · ${result.kind}` },
         escapeHtml(result.file || result.qualifiedName || "")
@@ -1856,28 +1951,28 @@ async function searchSymbols() {
   showSearchResults(true);
 }
 
-function selectPackageByName(packageName) {
+function selectPackageByName(packageName: string): void {
   const node = state.graph.nodes.find((candidate) => candidate.id === packageName);
   if (node) {
-    state.selectedNode = node;
+    state.selectedNode = node as SimNode;
     state.selectedEdge = null;
-    graph.focusNode(node);
-    graph.centerOn(node);
+    graph.focusNode(node as SimNode);
+    graph.centerOn(node as SimNode);
     renderRelations();
     renderBreadcrumb();
-    void loadPackageDetails(node);
+    void loadPackageDetails(node as SimNode);
   }
   showSearchResults(false);
   els.globalSymbolSearch.blur();
 }
 
-function showTooltip(node, pos) {
-  if (!node) {
+function showTooltip(node: SimNode | null, pos?: { clientX: number; clientY: number }): void {
+  if (!node || !pos) {
     els.graphTooltip.hidden = true;
     return;
   }
 
-  const wrap = els.graphCanvas.parentElement.getBoundingClientRect();
+  const wrap = els.graphCanvas.parentElement!.getBoundingClientRect();
   els.graphTooltip.hidden = false;
   els.graphTooltip.style.left = `${pos.clientX - wrap.left + 14}px`;
   els.graphTooltip.style.top = `${pos.clientY - wrap.top + 14}px`;
@@ -1887,15 +1982,15 @@ function showTooltip(node, pos) {
   `;
 }
 
-function edgeSourceId(edge) {
+function edgeSourceId(edge: SimEdge): string {
   return typeof edge.source === "string" ? edge.source : edge.source?.id;
 }
 
-function edgeTargetId(edge) {
+function edgeTargetId(edge: SimEdge): string {
   return typeof edge.target === "string" ? edge.target : edge.target?.id;
 }
 
-function errorMessage(error) {
+function errorMessage(error: unknown): string {
   if (error instanceof ApiError) return error.message;
   if (error instanceof Error) return error.message;
   return "Something went wrong.";
