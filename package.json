@@ -1,0 +1,41 @@
+{
+  "name": "codebase-memory-plus",
+  "version": "0.1.0",
+  "description": "Personal MCP layer on top of codebase-memory-mcp.",
+  "type": "module",
+  "bin": {
+    "codebase-memory-plus": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "build:dashboard": "esbuild dashboard/src/main.js --bundle --outfile=dashboard/app.js --format=esm",
+    "dev:dashboard": "esbuild dashboard/src/main.js --bundle --outfile=dashboard/app.js --format=esm --watch",
+    "predashboard": "npm run build:dashboard",
+    "dashboard": "node ./dist/dashboard-server.js",
+    "start": "node ./dist/index.js",
+    "dev": "tsx ./src/index.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.17.4",
+    "@types/sql.js": "^1.4.11",
+    "d3-drag": "^3.0.0",
+    "d3-force": "^3.0.0",
+    "d3-quadtree": "^3.0.1",
+    "d3-scale": "^4.0.2",
+    "d3-selection": "^3.0.0",
+    "d3-transition": "^3.0.1",
+    "d3-zoom": "^3.0.0",
+    "sql.js": "^1.14.1",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.14",
+    "esbuild": "^0.25.0",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

@@ -1,0 +1,406 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Codebase Memory Plus</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='10' fill='%230a0d0c'/%3E%3Ctext x='32' y='39' text-anchor='middle' font-family='Arial' font-size='18' font-weight='700' fill='%232dd6b8'%3ECM%2B%3C/text%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="app-header">
+        <button type="button" id="homeButton" class="brand brand-button" aria-label="All projects">
+          <span class="brand-mark">CM+</span>
+          <div class="brand-text">
+            <h1>Codebase Memory Plus</h1>
+            <span class="brand-sub">Local graph workspace</span>
+          </div>
+        </button>
+        <div class="header-search" id="headerSearch" hidden>
+          <select id="searchLabelFilter" class="select header-search-filter" aria-label="Search result type">
+            <option value="">All types</option>
+            <option value="Function">Function</option>
+            <option value="Method">Method</option>
+            <option value="Class">Class</option>
+            <option value="Interface">Interface</option>
+            <option value="Type">Type</option>
+            <option value="Route">Route</option>
+          </select>
+          <input
+            id="globalSymbolSearch"
+            class="input header-search-input"
+            type="search"
+            placeholder="Search functions, files, packages…"
+            aria-label="Search symbols"
+            autocomplete="off"
+          />
+          <div id="globalSearchResults" class="header-search-results" hidden></div>
+        </div>
+        <div class="app-header-actions">
+          <button type="button" id="adrButton" class="icon-button" title="Architecture Decision Record" aria-label="Architecture Decision Record" hidden>ADR</button>
+          <button type="button" id="queryButton" class="icon-button" title="Cypher query console" aria-label="Cypher query console" hidden>Query</button>
+          <button class="icon-button" id="shortcutsButton" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">?</button>
+          <button type="button" id="allProjectsButton" class="icon-button">All projects</button>
+        </div>
+      </header>
+
+      <main id="homeView" class="home">
+        <div class="home-head">
+          <div>
+            <p class="eyebrow">Projects</p>
+            <h2>Select a project</h2>
+          </div>
+          <div class="home-head-actions">
+            <select id="projectSort" class="select" aria-label="Sort projects">
+              <option value="size">Most nodes</option>
+              <option value="name">Name</option>
+              <option value="recent">Recently opened</option>
+            </select>
+            <input id="projectSearch" class="input" type="search" placeholder="Filter projects" aria-label="Filter projects" />
+          </div>
+        </div>
+        <section id="recentProjects" class="recent-projects" hidden>
+          <h4>Recently opened</h4>
+          <div id="recentProjectsGrid" class="recent-projects-grid"></div>
+        </section>
+        <div id="projectGrid" class="project-grid"></div>
+      </main>
+
+      <section id="workspaceView" class="workspace" hidden>
+        <section class="main-grid">
+          <div class="graph-panel">
+            <div class="panel-head compact-head">
+              <h3 title="Scroll to zoom · drag to pan · click to inspect">Package Graph</h3>
+              <div class="panel-head-actions">
+                <div class="size-toggle graph-mode-toggle" role="group" aria-label="Graph node granularity">
+                  <button type="button" id="graphModePackages" class="size-toggle-btn is-active" data-graph-mode="packages">Packages</button>
+                  <button type="button" id="graphModeSymbols" class="size-toggle-btn" data-graph-mode="symbols">Symbols</button>
+                </div>
+                <select id="layoutMode" class="select" aria-label="Graph layout">
+                  <option value="clustered" selected>Clustered</option>
+                  <option value="force">Force</option>
+                  <option value="radial">Radial</option>
+                  <option value="grid">Grid</option>
+                  <option value="tree">Tree</option>
+                </select>
+                <select id="graphFamily" class="select" aria-label="Graph area filter">
+                  <option value="">All areas</option>
+                </select>
+                <select id="graphLimit" class="select" aria-label="Graph node limit">
+                  <option value="30">30 nodes</option>
+                  <option value="60" selected>60 nodes</option>
+                  <option value="90">90 nodes</option>
+                  <option value="150">150 nodes</option>
+                  <option value="300">300 nodes</option>
+                  <option value="all">All nodes</option>
+                </select>
+                <button class="icon-button is-active" id="fitButton" title="Fit graph (f)" aria-label="Fit graph">Fit</button>
+                <button class="icon-button" id="isolateButton" title="Isolate neighbors (i)" aria-label="Isolate neighbors">Isolate</button>
+                <button class="icon-button" id="refreshButton" title="Refresh data (r)" aria-label="Refresh data">Refresh</button>
+              </div>
+            </div>
+            <div class="graph-filters" aria-label="Graph filters">
+              <div id="edgeTypeFilters" class="filter-chips"></div>
+              <div class="graph-filters-right">
+                <div class="size-toggle" role="group" aria-label="Node size">
+                  <button type="button" id="sizeByCount" class="size-toggle-btn is-active">Symbols</button>
+                  <button type="button" id="sizeByDegree" class="size-toggle-btn">Links</button>
+                </div>
+                <label class="weight-filter">
+                  <span>Min weight</span>
+                  <input id="minWeight" class="weight-range" type="range" min="1" max="1" value="1" step="1" />
+                  <span id="minWeightValue" class="weight-value">1</span>
+                </label>
+              </div>
+            </div>
+            <div class="graph-canvas-wrap">
+              <canvas id="graph" role="img" aria-label="Package dependency graph"></canvas>
+              <div id="graphTooltip" class="graph-tooltip" hidden></div>
+              <div id="graphStatus" class="graph-status" hidden>
+                <div class="graph-status-inner">
+                  <p id="graphStatusMessage"></p>
+                  <button id="graphRetry" class="icon-button" type="button" hidden>Retry</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <aside class="details-panel" aria-label="Details">
+            <div class="panel-head compact panel-head-sticky">
+              <div>
+                <p class="eyebrow">Graph overview</p>
+                <h2 id="projectTitle">Select a project</h2>
+                <nav id="breadcrumb" class="breadcrumb" aria-label="Breadcrumb" hidden>
+                  <span id="breadcrumbProject" class="breadcrumb-item"></span>
+                  <span class="breadcrumb-sep">/</span>
+                  <span id="breadcrumbPackage" class="breadcrumb-item is-current"></span>
+                  <button type="button" id="breadcrumbClear" class="breadcrumb-clear" title="Clear selection" aria-label="Clear selection">×</button>
+                </nav>
+              </div>
+            </div>
+
+            <div class="stat-strip" aria-label="Project metrics">
+              <div class="stat-grid">
+                <div class="stat">
+                  <span>Nodes</span>
+                  <strong id="nodesMetric">0</strong>
+                </div>
+                <div class="stat">
+                  <span>Edges</span>
+                  <strong id="edgesMetric">0</strong>
+                </div>
+                <div class="stat">
+                  <span>Packages</span>
+                  <strong id="packagesMetric">0</strong>
+                </div>
+                <div class="stat">
+                  <span>Largest package</span>
+                  <strong id="topPackageMetric">-</strong>
+                </div>
+              </div>
+              <div id="indexHealth" class="index-health"></div>
+            </div>
+
+            <div class="details-tabs" role="tablist" aria-label="Details view">
+              <button type="button" id="detailsTabSelection" class="details-tab is-active" role="tab" aria-selected="true" aria-controls="selectionTabPanel">Selection</button>
+              <button type="button" id="detailsTabInsights" class="details-tab" role="tab" aria-selected="false" aria-controls="insightsTabPanel">Insights</button>
+            </div>
+
+            <div id="selectionTabPanel" role="tabpanel">
+              <div class="section-block relations-block" aria-label="Top package relations">
+                <div class="tray-head">
+                  <h4 id="relationsTitle">Relations</h4>
+                  <span id="relationCount">0 shown</span>
+                </div>
+                <div id="edgeList" class="edge-list"></div>
+              </div>
+
+              <div class="panel-head compact panel-head-inspector">
+                <div>
+                  <p class="eyebrow">Inspector</p>
+                  <h3 id="detailTitle">Select a package</h3>
+                  <p id="detailSubtitle">Package details, relations, and symbols appear here.</p>
+                </div>
+              </div>
+
+              <div class="section-block">
+                <h4>Top Symbols</h4>
+                <div id="packageSymbols" class="symbol-list"></div>
+              </div>
+            </div>
+
+            <div id="insightsTabPanel" role="tabpanel" hidden>
+              <div class="insight-section">
+                <button type="button" id="compositionToggle" class="insight-header" aria-expanded="false" aria-controls="compositionPanel">
+                  <span>Composition</span> <span class="chevron">▾</span>
+                </button>
+                <div id="compositionPanel" class="composition-panel" hidden>
+                  <div class="composition-col">
+                    <h4>Node Types</h4>
+                    <div id="labelBars" class="bars"></div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="insight-section">
+                <button type="button" id="architectureToggle" class="insight-header" aria-expanded="false" aria-controls="architecturePanel">
+                  <span>Architecture</span> <span class="chevron">▾</span>
+                </button>
+                <div id="architecturePanel" class="composition-panel architecture-panel" hidden>
+                  <p id="architectureStatus" class="empty">Loading architecture insights…</p>
+                  <div id="architectureBody" class="architecture-body" hidden>
+                    <div class="composition-col">
+                      <h4>Layers</h4>
+                      <div id="archLayers" class="arch-list"></div>
+                    </div>
+                    <div class="composition-col">
+                      <h4>Hotspots</h4>
+                      <div id="archHotspots" class="arch-list"></div>
+                    </div>
+                    <div class="composition-col">
+                      <h4>Boundaries</h4>
+                      <div id="archBoundaries" class="arch-list"></div>
+                    </div>
+                    <div class="composition-col">
+                      <h4>Clusters</h4>
+                      <p class="arch-hint">De-facto modules from call-graph analysis — may cross folder boundaries.</p>
+                      <div id="archClusters" class="arch-list"></div>
+                    </div>
+                  </div>
+                  <div class="composition-col">
+                    <h4>API Surface</h4>
+                    <p id="apiSurfaceStatus" class="empty">Loading…</p>
+                    <div id="apiSurface" class="arch-list" hidden></div>
+                  </div>
+                  <div class="composition-col">
+                    <h4>Config</h4>
+                    <p id="configMapStatus" class="empty">Loading…</p>
+                    <div id="configMap" class="arch-list" hidden></div>
+                  </div>
+                  <div class="composition-col">
+                    <h4>Churn</h4>
+                    <p id="churnStatus" class="empty">Loading…</p>
+                    <div id="churnList" class="arch-list" hidden></div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="insight-section">
+                <button type="button" id="perfToggle" class="insight-header" aria-expanded="false" aria-controls="perfPanel">
+                  <span>Perf risks</span> <span class="chevron">▾</span>
+                </button>
+                <div id="perfPanel" class="composition-panel" hidden>
+                  <div class="composition-col">
+                    <p id="perfStatus" class="empty">Loading perf risks…</p>
+                    <div id="perfList" class="arch-list" hidden></div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="insight-section">
+                <button type="button" id="duplicatesToggle" class="insight-header" aria-expanded="false" aria-controls="duplicatesPanel">
+                  <span>Duplicates</span> <span class="chevron">▾</span>
+                </button>
+                <div id="duplicatesPanel" class="composition-panel" hidden>
+                  <div class="composition-col">
+                    <p id="duplicatesStatus" class="empty">Loading duplicates…</p>
+                    <div id="duplicatesList" class="arch-list" hidden></div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="insight-section">
+                <button type="button" id="impactToggle" class="insight-header" aria-expanded="false" aria-controls="impactPanel">
+                  <span>Impact</span> <span class="chevron">▾</span>
+                </button>
+                <div id="impactPanel" class="composition-panel" hidden>
+                  <div class="composition-col">
+                    <p id="impactStatus" class="empty">Loading impact…</p>
+                    <div id="impactBody" class="architecture-body" hidden>
+                      <div class="composition-col">
+                        <h4>Changed files</h4>
+                        <div id="impactFiles" class="arch-list"></div>
+                      </div>
+                      <div class="composition-col">
+                        <h4>Impacted symbols</h4>
+                        <div id="impactSymbols" class="symbol-list"></div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="insight-section">
+                <button type="button" id="crossRepoToggle" class="insight-header" aria-expanded="false" aria-controls="crossRepoPanel">
+                  <span>Cross-repo</span> <span class="chevron">▾</span>
+                </button>
+                <div id="crossRepoPanel" class="composition-panel" hidden>
+                  <div class="composition-col">
+                    <p class="arch-hint">Match HTTP/async calls against other indexed projects.</p>
+                    <div id="crossRepoProjects" class="cross-repo-projects"></div>
+                    <button type="button" id="crossRepoRun" class="icon-button is-active">Run</button>
+                  </div>
+                  <div class="composition-col">
+                    <p id="crossRepoStatus" class="empty">Select projects and run analysis.</p>
+                    <div id="crossRepoList" class="arch-list" hidden></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </aside>
+        </section>
+      </section>
+    </div>
+
+    <div id="shortcutsHelp" class="shortcuts-overlay" hidden>
+      <div class="shortcuts-card" role="dialog" aria-modal="true" aria-labelledby="shortcutsTitle">
+        <div class="shortcuts-head">
+          <h3 id="shortcutsTitle">Keyboard shortcuts</h3>
+          <button type="button" id="shortcutsClose" class="icon-button" aria-label="Close">Close</button>
+        </div>
+        <dl class="shortcuts-list">
+          <div><dt>/</dt><dd>Focus search</dd></div>
+          <div><dt>F</dt><dd>Fit graph to view</dd></div>
+          <div><dt>I</dt><dd>Toggle isolate neighbors</dd></div>
+          <div><dt>R</dt><dd>Refresh current project</dd></div>
+          <div><dt>Esc</dt><dd>Clear selection, or close this dialog</dd></div>
+          <div><dt>?</dt><dd>Toggle this help</dd></div>
+        </dl>
+      </div>
+    </div>
+
+    <div id="traceDialog" class="shortcuts-overlay" hidden>
+      <div class="shortcuts-card trace-card" role="dialog" aria-modal="true" aria-labelledby="traceTitle">
+        <div class="shortcuts-head">
+          <h3 id="traceTitle">Trace</h3>
+          <button type="button" id="traceClose" class="icon-button" aria-label="Close">Close</button>
+        </div>
+        <div class="size-toggle trace-mode-toggle" role="group" aria-label="Trace mode">
+          <button type="button" class="size-toggle-btn is-active" data-trace-mode="calls">Calls</button>
+          <button type="button" class="size-toggle-btn" data-trace-mode="data_flow">Data flow</button>
+          <button type="button" class="size-toggle-btn" data-trace-mode="cross_service">Cross-service</button>
+        </div>
+        <div class="trace-controls">
+          <label class="weight-filter">
+            <span>Direction</span>
+            <select id="traceDirection" class="select">
+              <option value="both" selected>Both</option>
+              <option value="inbound">Inbound</option>
+              <option value="outbound">Outbound</option>
+            </select>
+          </label>
+          <label class="weight-filter">
+            <span>Depth</span>
+            <select id="traceDepth" class="select">
+              <option value="1">1</option>
+              <option value="2">2</option>
+              <option value="3" selected>3</option>
+              <option value="4">4</option>
+              <option value="5">5</option>
+            </select>
+          </label>
+          <label class="weight-filter">
+            <input type="checkbox" id="traceIncludeTests" />
+            <span>Include tests</span>
+          </label>
+        </div>
+        <div id="traceBody" class="trace-body">
+          <p class="empty">Loading trace…</p>
+        </div>
+      </div>
+    </div>
+
+    <div id="adrDialog" class="shortcuts-overlay" hidden>
+      <div class="shortcuts-card wide-card" role="dialog" aria-modal="true" aria-labelledby="adrTitle">
+        <div class="shortcuts-head">
+          <h3 id="adrTitle">Architecture Decision Record</h3>
+          <button type="button" id="adrClose" class="icon-button" aria-label="Close">Close</button>
+        </div>
+        <p id="adrHint" class="empty" hidden></p>
+        <textarea id="adrTextarea" class="wide-textarea" spellcheck="false" placeholder="## PURPOSE&#10;...&#10;&#10;## STACK&#10;...&#10;&#10;## ARCHITECTURE&#10;...&#10;&#10;## PATTERNS&#10;...&#10;&#10;## TRADEOFFS&#10;...&#10;&#10;## PHILOSOPHY&#10;..."></textarea>
+        <div class="wide-card-actions">
+          <span id="adrSaveStatus" class="empty"></span>
+          <button type="button" id="adrSave" class="icon-button is-active">Save</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="queryDialog" class="shortcuts-overlay" hidden>
+      <div class="shortcuts-card wide-card" role="dialog" aria-modal="true" aria-labelledby="queryTitle">
+        <div class="shortcuts-head">
+          <h3 id="queryTitle">Cypher query</h3>
+          <button type="button" id="queryClose" class="icon-button" aria-label="Close">Close</button>
+        </div>
+        <textarea id="queryTextarea" class="wide-textarea query-textarea" spellcheck="false" placeholder="MATCH (f:Function) WHERE f.complexity > 10 RETURN f.name, f.complexity ORDER BY f.complexity DESC LIMIT 20"></textarea>
+        <div class="wide-card-actions">
+          <span id="queryStatus" class="empty"></span>
+          <button type="button" id="queryRun" class="icon-button is-active">Run</button>
+        </div>
+        <div id="queryResults" class="query-results"></div>
+      </div>
+    </div>
+
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>
