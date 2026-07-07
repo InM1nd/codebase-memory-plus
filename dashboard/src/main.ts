@@ -1,6 +1,6 @@
 import { ApiError, deleteJson, getJson, postJson, putJson } from "./api.js";
 import { PackageGraph, type SimEdge, type SimNode } from "./graph.js";
-import { loadPrefs, savePrefs } from "./storage.js";
+import { defaultSettings, loadPrefs, savePrefs, type Settings } from "./storage.js";
 import { debounce, edgeKey, escapeHtml, formatNumber, packageFromFile, prettyName, truncate } from "./utils.js";
 import type {
   AdrResult,
@@ -91,6 +91,13 @@ function q<T extends Element>(id: string): T {
 const els = {
   homeView: q<HTMLElement>("#homeView"),
   workspaceView: q<HTMLElement>("#workspaceView"),
+  uiModePlus: q<HTMLButtonElement>("#uiModePlus"),
+  uiModeOriginal: q<HTMLButtonElement>("#uiModeOriginal"),
+  originalUiView: q<HTMLElement>("#originalUiView"),
+  originalUiFrame: q<HTMLIFrameElement>("#originalUiFrame"),
+  originalUiError: q<HTMLDivElement>("#originalUiError"),
+  originalUiErrorMessage: q<HTMLParagraphElement>("#originalUiErrorMessage"),
+  originalUiRetry: q<HTMLButtonElement>("#originalUiRetry"),
   projectGrid: q<HTMLDivElement>("#projectGrid"),
   projectSearch: q<HTMLInputElement>("#projectSearch"),
   projectSort: q<HTMLSelectElement>("#projectSort"),
@@ -110,6 +117,7 @@ const els = {
   indexHealth: q<HTMLDivElement>("#indexHealth"),
   labelBars: q<HTMLDivElement>("#labelBars"),
   graphCanvas: q<HTMLCanvasElement>("#graph"),
+  graphCanvasWrap: q<HTMLDivElement>("#graphCanvasWrap"),
   graphModePackages: q<HTMLButtonElement>("#graphModePackages"),
   graphModeSymbols: q<HTMLButtonElement>("#graphModeSymbols"),
   layoutMode: q<HTMLSelectElement>("#layoutMode"),
@@ -177,6 +185,9 @@ const els = {
   globalSearchResults: q<HTMLDivElement>("#globalSearchResults"),
   refreshButton: q<HTMLButtonElement>("#refreshButton"),
   fitButton: q<HTMLButtonElement>("#fitButton"),
+  zoomInButton: q<HTMLButtonElement>("#zoomInButton"),
+  zoomOutButton: q<HTMLButtonElement>("#zoomOutButton"),
+  zoomResetButton: q<HTMLButtonElement>("#zoomResetButton"),
   shortcutsHelp: q<HTMLDivElement>("#shortcutsHelp"),
   shortcutsButton: q<HTMLButtonElement>("#shortcutsButton"),
   shortcutsClose: q<HTMLButtonElement>("#shortcutsClose"),
@@ -200,7 +211,27 @@ const els = {
   traceClose: q<HTMLButtonElement>("#traceClose"),
   traceDirection: q<HTMLSelectElement>("#traceDirection"),
   traceDepth: q<HTMLSelectElement>("#traceDepth"),
-  traceIncludeTests: q<HTMLInputElement>("#traceIncludeTests")
+  traceIncludeTests: q<HTMLInputElement>("#traceIncludeTests"),
+  settingsButton: q<HTMLButtonElement>("#settingsButton"),
+  settingsDialog: q<HTMLDivElement>("#settingsDialog"),
+  settingsClose: q<HTMLButtonElement>("#settingsClose"),
+  settingsReset: q<HTMLButtonElement>("#settingsReset"),
+  settingRadiusMin: q<HTMLInputElement>("#settingRadiusMin"),
+  settingRadiusMinValue: q<HTMLSpanElement>("#settingRadiusMinValue"),
+  settingRadiusMax: q<HTMLInputElement>("#settingRadiusMax"),
+  settingRadiusMaxValue: q<HTMLSpanElement>("#settingRadiusMaxValue"),
+  settingShowGrid: q<HTMLInputElement>("#settingShowGrid"),
+  settingEdgeCurvature: q<HTMLSelectElement>("#settingEdgeCurvature"),
+  settingAutoFit: q<HTMLInputElement>("#settingAutoFit"),
+  settingReducedMotion: q<HTMLInputElement>("#settingReducedMotion"),
+  settingLabelThreshold: q<HTMLInputElement>("#settingLabelThreshold"),
+  settingLabelThresholdValue: q<HTMLSpanElement>("#settingLabelThresholdValue"),
+  settingOriginalUiUrl: q<HTMLInputElement>("#settingOriginalUiUrl"),
+  perfBadge: q<HTMLSpanElement>("#perfBadge"),
+  duplicatesBadge: q<HTMLSpanElement>("#duplicatesBadge"),
+  impactBadge: q<HTMLSpanElement>("#impactBadge"),
+  filtersToggle: q<HTMLButtonElement>("#filtersToggle"),
+  graphFilters: q<HTMLDivElement>("#graphFilters")
 };
 
 const graph = new PackageGraph(els.graphCanvas, {
@@ -222,7 +253,10 @@ const graph = new PackageGraph(els.graphCanvas, {
     renderBreadcrumb();
   },
   onHoverNode: (node, pos) => showTooltip(node, pos),
-  onBackgroundClick: () => clearSelection()
+  onBackgroundClick: () => clearSelection(),
+  onZoomChange: (scale) => {
+    els.zoomResetButton.textContent = `${Math.round(scale * 100)}%`;
+  }
 });
 
 function clearSelection(): void {
@@ -247,6 +281,9 @@ await boot();
 async function boot(): Promise<void> {
   bindEvents();
   const prefs = loadPrefs();
+  applySettingsToGraph(prefs);
+  els.graphCanvasWrap.classList.toggle("no-grid", !prefs.showGrid);
+  if (prefs.filtersCollapsed) setFiltersCollapsed(true);
   if (prefs.sizeBy === "degree") setSizeMode("degree");
   if (prefs.layoutMode && prefs.layoutMode !== "clustered") {
     els.layoutMode.value = prefs.layoutMode;
@@ -256,6 +293,7 @@ async function boot(): Promise<void> {
   els.projectSort.value = prefs.projectSort;
   if (prefs.graphMode === "symbols") applyGraphMode("symbols");
   await loadProjects();
+  if (prefs.uiMode === "original") setUiMode("original");
 }
 
 function bindEvents(): void {
@@ -267,6 +305,9 @@ function bindEvents(): void {
   });
   els.homeButton.addEventListener("click", () => showHome());
   els.allProjectsButton.addEventListener("click", () => showHome());
+  els.uiModePlus.addEventListener("click", () => setUiMode("plus"));
+  els.uiModeOriginal.addEventListener("click", () => setUiMode("original"));
+  els.originalUiRetry.addEventListener("click", () => void loadOriginalUi());
   els.graphModePackages.addEventListener("click", () => setGraphMode("packages"));
   els.graphModeSymbols.addEventListener("click", () => setGraphMode("symbols"));
   els.layoutMode.addEventListener("change", () => {
@@ -283,7 +324,11 @@ function bindEvents(): void {
   });
   els.refreshButton.addEventListener("click", () => loadActiveProject());
   els.fitButton.addEventListener("click", () => graph.fit());
+  els.zoomInButton.addEventListener("click", () => graph.zoomBy(1.4));
+  els.zoomOutButton.addEventListener("click", () => graph.zoomBy(1 / 1.4));
+  els.zoomResetButton.addEventListener("click", () => graph.zoomReset());
   els.isolateButton.addEventListener("click", () => toggleIsolate());
+  els.filtersToggle.addEventListener("click", () => setFiltersCollapsed(!els.graphFilters.hidden));
   els.sizeByCount.addEventListener("click", () => setSizeMode("count"));
   els.sizeByDegree.addEventListener("click", () => setSizeMode("degree"));
   els.graphRetry.addEventListener("click", () => loadActiveProject());
@@ -379,6 +424,12 @@ function bindEvents(): void {
   els.shortcutsHelp.addEventListener("click", (event) => {
     if (event.target === els.shortcutsHelp) toggleShortcuts(false);
   });
+  els.settingsButton.addEventListener("click", () => toggleSettings(true));
+  els.settingsClose.addEventListener("click", () => toggleSettings(false));
+  els.settingsDialog.addEventListener("click", (event) => {
+    if (event.target === els.settingsDialog) toggleSettings(false);
+  });
+  bindSettingsControls();
   window.addEventListener("keydown", handleGlobalKeydown);
 }
 
@@ -388,6 +439,86 @@ function showSearchResults(show: boolean): void {
 
 function toggleShortcuts(show: boolean): void {
   els.shortcutsHelp.hidden = !show;
+}
+
+function toggleSettings(show: boolean): void {
+  els.settingsDialog.hidden = !show;
+  if (show) applySettingsToUi(loadPrefs());
+}
+
+function applySettingsToUi(settings: Settings): void {
+  els.settingRadiusMin.value = String(settings.nodeRadiusMin);
+  els.settingRadiusMinValue.textContent = String(settings.nodeRadiusMin);
+  els.settingRadiusMax.value = String(settings.nodeRadiusMax);
+  els.settingRadiusMaxValue.textContent = String(settings.nodeRadiusMax);
+  els.settingShowGrid.checked = settings.showGrid;
+  els.settingEdgeCurvature.value = settings.edgeCurvature;
+  els.settingAutoFit.checked = settings.autoFitOnLoad;
+  els.settingReducedMotion.checked = settings.reducedMotion;
+  els.settingLabelThreshold.value = String(settings.labelZoomThreshold);
+  els.settingLabelThresholdValue.textContent = settings.labelZoomThreshold.toFixed(1);
+  els.settingOriginalUiUrl.value = settings.originalUiUrl;
+  els.graphCanvasWrap.classList.toggle("no-grid", !settings.showGrid);
+}
+
+function applySettingsToGraph(settings: Settings): void {
+  graph.setOptions({
+    nodeRadiusMin: settings.nodeRadiusMin,
+    nodeRadiusMax: settings.nodeRadiusMax,
+    edgeCurvature: settings.edgeCurvature,
+    reducedMotion: settings.reducedMotion,
+    labelZoomThreshold: settings.labelZoomThreshold
+  });
+}
+
+function bindSettingsControls(): void {
+  els.settingRadiusMin.addEventListener("input", () => {
+    const nodeRadiusMin = Number(els.settingRadiusMin.value);
+    els.settingRadiusMinValue.textContent = String(nodeRadiusMin);
+    savePrefs({ nodeRadiusMin });
+    applySettingsToGraph(loadPrefs());
+  });
+  els.settingRadiusMax.addEventListener("input", () => {
+    const nodeRadiusMax = Number(els.settingRadiusMax.value);
+    els.settingRadiusMaxValue.textContent = String(nodeRadiusMax);
+    savePrefs({ nodeRadiusMax });
+    applySettingsToGraph(loadPrefs());
+  });
+  els.settingShowGrid.addEventListener("change", () => {
+    const showGrid = els.settingShowGrid.checked;
+    savePrefs({ showGrid });
+    els.graphCanvasWrap.classList.toggle("no-grid", !showGrid);
+  });
+  els.settingEdgeCurvature.addEventListener("change", () => {
+    const edgeCurvature = els.settingEdgeCurvature.value as Settings["edgeCurvature"];
+    savePrefs({ edgeCurvature });
+    applySettingsToGraph(loadPrefs());
+  });
+  els.settingAutoFit.addEventListener("change", () => {
+    savePrefs({ autoFitOnLoad: els.settingAutoFit.checked });
+  });
+  els.settingReducedMotion.addEventListener("change", () => {
+    const reducedMotion = els.settingReducedMotion.checked;
+    savePrefs({ reducedMotion });
+    applySettingsToGraph(loadPrefs());
+  });
+  els.settingLabelThreshold.addEventListener("input", () => {
+    const labelZoomThreshold = Number(els.settingLabelThreshold.value);
+    els.settingLabelThresholdValue.textContent = labelZoomThreshold.toFixed(1);
+    savePrefs({ labelZoomThreshold });
+    applySettingsToGraph(loadPrefs());
+  });
+  els.settingOriginalUiUrl.addEventListener("change", () => {
+    const originalUiUrl = els.settingOriginalUiUrl.value.trim() || defaultSettings.originalUiUrl;
+    els.settingOriginalUiUrl.value = originalUiUrl;
+    savePrefs({ originalUiUrl });
+  });
+  els.settingsReset.addEventListener("click", () => {
+    savePrefs({ ...defaultSettings });
+    const prefs = loadPrefs();
+    applySettingsToUi(prefs);
+    applySettingsToGraph(prefs);
+  });
 }
 
 function toggleTrace(show: boolean): void {
@@ -729,6 +860,16 @@ function renderArchitecture(data: ArchitectureInsights): void {
     : `<p class="empty">No clusters found.</p>`;
 }
 
+function setInsightBadge(el: HTMLElement, count: number, highThreshold: number): void {
+  if (count <= 0) {
+    el.hidden = true;
+    return;
+  }
+  el.textContent = String(count);
+  el.classList.toggle("is-high", count >= highThreshold);
+  el.hidden = false;
+}
+
 async function loadPerfRisks(): Promise<void> {
   if (!state.activeProject) return;
 
@@ -741,6 +882,7 @@ async function loadPerfRisks(): Promise<void> {
     const data = await getJson<{ results: PerfRisk[] }>(`/api/projects/${encodeURIComponent(state.activeProject)}/perf-risks`);
     state.perf = data.results;
     renderPerfRisks(data.results);
+    setInsightBadge(els.perfBadge, data.results.length, 5);
     els.perfStatus.hidden = true;
     els.perfList.hidden = false;
   } catch (error) {
@@ -798,6 +940,7 @@ async function loadDuplicates(): Promise<void> {
     );
     state.duplicates = data.results;
     renderDuplicates(data.results);
+    setInsightBadge(els.duplicatesBadge, data.results.length, 3);
     els.duplicatesStatus.hidden = true;
     els.duplicatesList.hidden = false;
   } catch (error) {
@@ -839,6 +982,7 @@ async function loadImpact(): Promise<void> {
     const data = await getJson<ImpactResult>(`/api/projects/${encodeURIComponent(state.activeProject)}/impact`);
     state.impact = data;
     renderImpact(data);
+    setInsightBadge(els.impactBadge, data.impacted_symbols?.length ?? data.changed_count ?? 0, 10);
     els.impactStatus.hidden = true;
     els.impactBody.hidden = false;
   } catch (error) {
@@ -1061,6 +1205,14 @@ function toggleIsolate(): void {
   if (state.isolate && state.selectedNode) graph.centerOn(state.selectedNode);
 }
 
+function setFiltersCollapsed(collapsed: boolean): void {
+  els.graphFilters.hidden = collapsed;
+  els.filtersToggle.classList.toggle("is-collapsed", collapsed);
+  els.filtersToggle.setAttribute("aria-expanded", String(!collapsed));
+  els.filtersToggle.title = collapsed ? "Show relation filters" : "Hide relation filters";
+  savePrefs({ filtersCollapsed: collapsed });
+}
+
 function handleGlobalKeydown(event: KeyboardEvent): void {
   const target = event.target;
   const isTyping =
@@ -1081,6 +1233,10 @@ function handleGlobalKeydown(event: KeyboardEvent): void {
     }
     if (!els.shortcutsHelp.hidden) {
       toggleShortcuts(false);
+      return;
+    }
+    if (!els.settingsDialog.hidden) {
+      toggleSettings(false);
       return;
     }
     if (target === els.globalSymbolSearch) {
@@ -1120,12 +1276,36 @@ function handleGlobalKeydown(event: KeyboardEvent): void {
     return;
   }
 
+  if (event.key === "g" || event.key === "G") {
+    setGraphMode(state.graphMode === "packages" ? "symbols" : "packages");
+    return;
+  }
+
+  if (event.key === "+" || event.key === "=") {
+    event.preventDefault();
+    graph.zoomBy(1.4);
+    return;
+  }
+
+  if (event.key === "-" || event.key === "_") {
+    event.preventDefault();
+    graph.zoomBy(1 / 1.4);
+    return;
+  }
+
+  if (event.key === "0") {
+    graph.zoomReset();
+    return;
+  }
+
   if (event.key === "?") {
     toggleShortcuts(true);
   }
 }
 
 function showHome(): void {
+  setUiModeButtons("plus");
+  els.originalUiView.hidden = true;
   els.workspaceView.hidden = true;
   els.homeView.hidden = false;
   els.headerSearch.hidden = true;
@@ -1136,11 +1316,61 @@ function showHome(): void {
 }
 
 function showWorkspace(): void {
+  setUiModeButtons("plus");
+  els.originalUiView.hidden = true;
   els.homeView.hidden = true;
   els.workspaceView.hidden = false;
   els.headerSearch.hidden = false;
   els.adrButton.hidden = false;
   els.queryButton.hidden = false;
+}
+
+function setUiModeButtons(mode: "plus" | "original"): void {
+  els.uiModePlus.classList.toggle("is-active", mode === "plus");
+  els.uiModeOriginal.classList.toggle("is-active", mode === "original");
+  savePrefs({ uiMode: mode });
+}
+
+function setUiMode(mode: "plus" | "original"): void {
+  if (mode === "plus") {
+    if (state.activeProject) showWorkspace();
+    else showHome();
+    return;
+  }
+
+  setUiModeButtons("original");
+  els.homeView.hidden = true;
+  els.workspaceView.hidden = true;
+  els.headerSearch.hidden = true;
+  els.adrButton.hidden = true;
+  els.queryButton.hidden = true;
+  els.originalUiView.hidden = false;
+  void loadOriginalUi();
+}
+
+async function loadOriginalUi(): Promise<void> {
+  const url = loadPrefs().originalUiUrl.trim() || defaultSettings.originalUiUrl;
+
+  els.originalUiError.hidden = true;
+  els.originalUiFrame.hidden = true;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 2500);
+  try {
+    // no-cors: we only care whether the request reaches something, not what it
+    // returns - the response is opaque and unreadable across origins either way.
+    await fetch(url, { mode: "no-cors", signal: controller.signal });
+    if (els.originalUiFrame.src !== url) els.originalUiFrame.src = url;
+    els.originalUiFrame.hidden = false;
+  } catch (error) {
+    els.originalUiErrorMessage.textContent =
+      error instanceof Error && error.name === "AbortError"
+        ? `Timed out reaching ${url}. Make sure codebase-memory-mcp is running with --ui=true.`
+        : `Couldn't reach ${url}. Make sure codebase-memory-mcp is running with --ui=true.`;
+    els.originalUiError.hidden = false;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 async function loadProjects(): Promise<void> {
@@ -1418,14 +1648,20 @@ function applyGraphMode(mode: "packages" | "symbols"): void {
   els.graphModePackages.classList.toggle("is-active", mode === "packages");
   els.graphModeSymbols.classList.toggle("is-active", mode === "symbols");
 
-  // Tree's "nearest existing ancestor" nesting relies on real package/folder nodes to
-  // walk up to - there are none in Symbols mode, so it has nothing to nest against.
-  const treeOption = els.layoutMode.querySelector<HTMLOptionElement>('option[value="tree"]')!;
-  treeOption.disabled = mode === "symbols";
-  if (mode === "symbols" && els.layoutMode.value === "tree") {
-    els.layoutMode.value = "clustered";
-    graph.setLayoutMode("clustered");
-    savePrefs({ layoutMode: "clustered" });
+  // Both Size-by buttons mean something different depending on mode: a symbol node has no
+  // "symbols inside" it (readSymbolGraph reuses node.count for its whole-project degree
+  // instead), and "Links" as raw degree-per-symbol only makes sense for packages - a single
+  // symbol doesn't "contain" anything, so its second dimension is complexity instead.
+  if (mode === "packages") {
+    els.sizeByCount.textContent = "Symbols";
+    els.sizeByCount.title = "Bigger node = more symbols (functions, classes, etc.) inside it";
+    els.sizeByDegree.textContent = "Links";
+    els.sizeByDegree.title = "Bigger node = more connections per symbol it contains (density), not just raw size";
+  } else {
+    els.sizeByCount.textContent = "Connections";
+    els.sizeByCount.title = "Bigger node = more total connections across the whole project";
+    els.sizeByDegree.textContent = "Complexity";
+    els.sizeByDegree.title = "Bigger node = higher cyclomatic/cognitive complexity or more lines of code";
   }
 }
 
@@ -1466,9 +1702,17 @@ async function loadActiveProject({ restoreFilters = false }: { restoreFilters?: 
   state.duplicates = null;
   state.impact = null;
   state.crossRepoProjects = null;
+  els.perfBadge.hidden = true;
+  els.duplicatesBadge.hidden = true;
+  els.impactBadge.hidden = true;
   INSIGHT_PANEL_KEYS.forEach(closeInsightPanel);
   setDetailsTab("selection");
   void loadIndexHealth();
+  // Perf risks and duplicates are cheap local-cache reads (no MCP round-trip), so it's
+  // worth firing them eagerly just to populate the attention badges - unlike Architecture/
+  // Impact/Cross-repo, which stay on-demand since they call out to the base MCP server.
+  void loadPerfRisks();
+  void loadDuplicates();
 
   if (restoreFilters) {
     const prefs = loadPrefs();
@@ -1511,12 +1755,17 @@ async function loadGraph(): Promise<void> {
   state.graph = graphData;
   state.selectedNode = null;
   state.selectedEdge = null;
-  state.hiddenEdgeTypes = new Set();
-  state.minWeight = 1;
+  // Keep the user's edge-type/weight filters across a limit/area/mode change instead of
+  // silently resetting them - only drop hidden types that no longer exist in this data.
+  const availableTypes = new Set(graphData.edges.map((edge) => edge.type));
+  state.hiddenEdgeTypes = new Set([...state.hiddenEdgeTypes].filter((type) => availableTypes.has(type)));
 
   renderBreadcrumb();
   setGraphStatus(graphData.nodes.length ? "ready" : "empty");
   graph.setData(graphData.nodes, graphData.edges);
+  // setData() always re-fits (it has to, for a brand-new project's graph) - undo that
+  // right after when the user disabled auto-fit for in-place filter/limit changes.
+  if (!loadPrefs().autoFitOnLoad) graph.autoFit = false;
   graph.setFilters({ hiddenTypes: state.hiddenEdgeTypes, minWeight: state.minWeight });
   renderEdgeTypeFilters();
   renderRelations();
@@ -1574,9 +1823,23 @@ function renderSummary(): void {
 function renderEdgeTypeFilters(): void {
   const counts = graph.getEdgeTypeCounts();
   const maxCount = Math.max(1, ...state.graph.edges.map((edge) => edge.count));
+  // Symbol-level edges are already deduplicated 1:1 relationships (a call either exists
+  // between two symbols or it doesn't), so count is always 1 and the slider has nothing
+  // to filter - disable it instead of showing a control that silently does nothing.
+  const weightIsMeaningful = state.graphMode === "packages" && maxCount > 1;
+  els.minWeight.disabled = !weightIsMeaningful;
+  els.minWeight.title = weightIsMeaningful
+    ? ""
+    : "Only applies in Packages view, where relations are aggregated across multiple symbols";
   els.minWeight.min = "1";
   els.minWeight.max = String(Math.max(1, maxCount));
-  els.minWeight.value = String(Math.min(state.minWeight, Math.max(1, maxCount)));
+  // Clamp state (not just the input's displayed value) so the slider and the actual
+  // filter being applied never disagree after the available weight range shrinks.
+  if (state.minWeight > maxCount) {
+    state.minWeight = Math.max(1, maxCount);
+    graph.setFilters({ minWeight: state.minWeight });
+  }
+  els.minWeight.value = String(state.minWeight);
   els.minWeightValue.textContent = els.minWeight.value;
 
   if (!counts.length) {

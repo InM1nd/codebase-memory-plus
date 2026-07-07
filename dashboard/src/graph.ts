@@ -25,6 +25,12 @@ const MUTED_EDGE_COLOR = "#6f827d";
 export type SimNode = GraphNode &
   SimulationNodeDatum & {
     degree: number;
+    // What "Size by Links" actually sizes nodes by - degree/count are near-identical for a
+    // package with 100 symbols vs one with 5, so a second raw-degree mode barely reads as
+    // different. This is a deliberately different signal: connection density for packages
+    // (degree per symbol they contain), complexity for individual symbols (they don't
+    // "contain" anything, so degree-per-symbol is undefined for them).
+    secondaryMetric: number;
     radius: number;
     color: string;
     fx?: number | null;
@@ -46,6 +52,7 @@ export type GraphCallbacks = {
   onSelectEdge?: (edge: SimEdge) => void;
   onHoverNode?: (node: SimNode | null, pos?: { clientX: number; clientY: number }) => void;
   onBackgroundClick?: () => void;
+  onZoomChange?: (scale: number) => void;
 };
 
 type Point = { x: number; y: number };
@@ -78,6 +85,7 @@ export class PackageGraph {
   onSelectEdge: (edge: SimEdge) => void;
   onHoverNode: (node: SimNode | null, pos?: { clientX: number; clientY: number }) => void;
   onBackgroundClick: () => void;
+  onZoomChange: (scale: number) => void;
 
   nodes: SimNode[] = [];
   edges: SimEdge[] = [];
@@ -87,6 +95,13 @@ export class PackageGraph {
   filters: { hiddenTypes: Set<string>; minWeight: number } = { hiddenTypes: new Set(), minWeight: 1 };
   typeColors: Map<string, string> = new Map();
   sizeMode: "count" | "degree" = "count";
+  maxCountMetric = 1;
+  maxSecondaryMetric = 1;
+  nodeRadiusMin = 7;
+  nodeRadiusMax = 36;
+  edgeCurvature: "straight" | "curved" = "curved";
+  reducedMotion = false;
+  labelZoomThreshold = 1.3;
   isolate = false;
   layoutMode: "force" | "clustered" | "radial" | "grid" | "tree" = "clustered";
   _layoutTargets: Map<string, Point> = new Map();
@@ -117,6 +132,7 @@ export class PackageGraph {
     this.onSelectEdge = callbacks.onSelectEdge ?? (() => {});
     this.onHoverNode = callbacks.onHoverNode ?? (() => {});
     this.onBackgroundClick = callbacks.onBackgroundClick ?? (() => {});
+    this.onZoomChange = callbacks.onZoomChange ?? (() => {});
 
     this.dpr = Math.max(1, window.devicePixelRatio || 1);
 
@@ -130,7 +146,11 @@ export class PackageGraph {
       )
       .force(
         "charge",
-        forceManyBody<SimNode>().strength((d) => (this._isStructuredLayout() ? 0 : -300 - Math.min(700, d.degree * 16)))
+        forceManyBody<SimNode>().strength((d) => {
+          if (this._isStructuredLayout()) return 0;
+          const [base, cap, perDegree] = this.reducedMotion ? [-120, 300, 6] : [-300, 700, 16];
+          return base - Math.min(cap, d.degree * perDegree);
+        })
       )
       .force("collide", forceCollide<SimNode>().radius((d) => d.radius + 26))
       .force("center", forceCenter<SimNode>(0, 0))
@@ -168,13 +188,24 @@ export class PackageGraph {
 
     const previous = new Map(this.nodes.map((node) => [node.id, node]));
 
+    this.maxCountMetric = Math.max(1, ...nodes.map((node) => node.count ?? 0));
+
+    const secondaryOf = (node: GraphNode, deg: number): number => {
+      if (node.kind === "package") return deg / Math.max(1, node.count ?? 1);
+      const meta = node.meta;
+      return meta?.complexity ?? meta?.cognitive ?? meta?.lines ?? deg;
+    };
+    this.maxSecondaryMetric = Math.max(1, ...nodes.map((node) => secondaryOf(node, degree.get(node.id) ?? 0)));
+
     this.nodes = nodes.map((node) => {
       const prev = previous.get(node.id);
       const deg = degree.get(node.id) ?? 0;
+      const secondaryMetric = secondaryOf(node, deg);
       return {
         ...node,
         degree: deg,
-        radius: this._radiusFor(node.count, deg),
+        secondaryMetric,
+        radius: this._radiusFor(node.count, secondaryMetric),
         color: familyColor(this._familyPathOf(node)),
         x: prev?.x ?? (Math.random() - 0.5) * 320,
         y: prev?.y ?? (Math.random() - 0.5) * 320,
@@ -223,7 +254,7 @@ export class PackageGraph {
     if (mode !== "count" && mode !== "degree") return;
     this.sizeMode = mode;
     for (const node of this.nodes) {
-      node.radius = this._radiusFor(node.count, node.degree);
+      node.radius = this._radiusFor(node.count, node.secondaryMetric);
     }
     this.simulation.force<ReturnType<typeof forceCollide<SimNode>>>("collide")?.radius((d) => d.radius + 16);
     this.simulation.alpha(0.4).restart();
@@ -232,6 +263,29 @@ export class PackageGraph {
 
   setIsolate(enabled: boolean): void {
     this.isolate = Boolean(enabled);
+    this.requestRender();
+  }
+
+  setOptions(
+    partial: Partial<{
+      nodeRadiusMin: number;
+      nodeRadiusMax: number;
+      edgeCurvature: "straight" | "curved";
+      reducedMotion: boolean;
+      labelZoomThreshold: number;
+    }>
+  ): void {
+    const radiusChanged =
+      (partial.nodeRadiusMin !== undefined && partial.nodeRadiusMin !== this.nodeRadiusMin) ||
+      (partial.nodeRadiusMax !== undefined && partial.nodeRadiusMax !== this.nodeRadiusMax);
+    Object.assign(this, partial);
+    if (radiusChanged) {
+      for (const node of this.nodes) {
+        node.radius = this._radiusFor(node.count, node.secondaryMetric);
+      }
+      this.simulation.force<ReturnType<typeof forceCollide<SimNode>>>("collide")?.radius((d) => d.radius + 16);
+      this.simulation.alpha(0.3).restart();
+    }
     this.requestRender();
   }
 
@@ -277,6 +331,26 @@ export class PackageGraph {
     this.requestRender();
   }
 
+  _effectiveDuration(duration: number): number {
+    return this.reducedMotion ? 0 : duration;
+  }
+
+  zoomBy(factor: number, duration = 200): void {
+    this.autoFit = false;
+    this.selection
+      .transition()
+      .duration(this._effectiveDuration(duration))
+      .call(this.zoomBehavior.scaleBy as never, factor);
+  }
+
+  zoomReset(duration = 200): void {
+    this.autoFit = false;
+    this.selection
+      .transition()
+      .duration(this._effectiveDuration(duration))
+      .call(this.zoomBehavior.scaleTo as never, 1);
+  }
+
   fit(padding = 60, duration = 320, subset: SimNode[] = this.nodes): void {
     if (!subset.length || !this.width || !this.height) return;
 
@@ -288,13 +362,14 @@ export class PackageGraph {
     const maxY = Math.max(...ys) + padding;
     const w = Math.max(1, maxX - minX);
     const h = Math.max(1, maxY - minY);
-    const scale = clamp(Math.min(this.width / w, this.height / h), 0.15, 2.5);
+    const scale = clamp(Math.min(this.width / w, this.height / h), 0.04, 2.5);
     const tx = this.width / 2 - scale * ((minX + maxX) / 2);
     const ty = this.height / 2 - scale * ((minY + maxY) / 2);
     const target = zoomIdentity.translate(tx, ty).scale(scale);
+    const effectiveDuration = this._effectiveDuration(duration);
 
-    if (duration > 0) {
-      this.selection.transition().duration(duration).call(this.zoomBehavior.transform as never, target);
+    if (effectiveDuration > 0) {
+      this.selection.transition().duration(effectiveDuration).call(this.zoomBehavior.transform as never, target);
     } else {
       this.selection.call(this.zoomBehavior.transform as never, target);
     }
@@ -344,9 +419,16 @@ export class PackageGraph {
     return this.typeColors.get(type)!;
   }
 
-  _radiusFor(count: number | undefined, degree: number): number {
-    const metric = this.sizeMode === "degree" ? degree : (count ?? 0);
-    return 10 + Math.min(18, Math.sqrt(metric || 1) * 1.15);
+  _radiusFor(count: number | undefined, secondaryMetric: number): number {
+    const minRadius = this.nodeRadiusMin;
+    const maxRadius = Math.max(minRadius + 1, this.nodeRadiusMax);
+    const metric = this.sizeMode === "degree" ? secondaryMetric : (count ?? 0);
+    const maxMetric = this.sizeMode === "degree" ? this.maxSecondaryMetric : this.maxCountMetric;
+    if (maxMetric <= 0) return minRadius;
+    // Relative to the largest node currently in view, so the biggest hubs read as
+    // clearly biggest instead of everything past a small metric flattening to one size.
+    const t = Math.sqrt(Math.min(metric, maxMetric) / maxMetric);
+    return minRadius + t * (maxRadius - minRadius);
   }
 
   _isStructuredLayout(): boolean {
@@ -431,10 +513,18 @@ export class PackageGraph {
     return map;
   }
 
+  // Packages mode has real folder nodes to nest against; Symbols mode doesn't (a symbol's id
+  // is a dot-delimited qualified name, not a path), so it needs the folder hierarchy
+  // synthesized from each symbol's file path instead.
+  _computeTreeTargets(): Map<string, Point> {
+    const allPackageNodes = this.nodes.every((node) => node.kind === "package");
+    return allPackageNodes ? this._computeTreeTargetsFromRealNodes() : this._computeTreeTargetsFromFolders();
+  }
+
   // Real folder nodes only - each attaches to its nearest existing ancestor package (there's
   // often no real node for an intermediate folder, e.g. "src/components" when every file
   // lives one level deeper). Depth -> horizontal, DFS leaf order -> vertical.
-  _computeTreeTargets(): Map<string, Point> {
+  _computeTreeTargetsFromRealNodes(): Map<string, Point> {
     const ids = this.nodes.map((node) => node.id);
     const idSet = new Set(ids);
     const parentOf = new Map<string, string | null>();
@@ -488,6 +578,67 @@ export class PackageGraph {
       const depth = depthOf.get(id) ?? 0;
       const y = yOf.get(id) ?? 0;
       map.set(id, {
+        x: (depth / maxDepth) * depthSpan - depthSpan / 2,
+        y: (y - leafSpan / 2) * rowHeight
+      });
+    }
+    return map;
+  }
+
+  // Every node here hangs off its file's folder, but none of those folders exist as real
+  // nodes - the whole chain (root -> every intermediate segment -> the node's own folder)
+  // is synthesized purely to compute a position, so folders never get map entries of their own.
+  _computeTreeTargetsFromFolders(): Map<string, Point> {
+    type FolderEntry = { children: Set<string>; leaves: SimNode[] };
+    const folders = new Map<string, FolderEntry>();
+    const ensureFolder = (path: string): FolderEntry => {
+      let entry = folders.get(path);
+      if (!entry) {
+        entry = { children: new Set(), leaves: [] };
+        folders.set(path, entry);
+      }
+      return entry;
+    };
+
+    const ROOT = "(root)";
+    ensureFolder(ROOT);
+    for (const node of this.nodes) {
+      const folderPath = this._familyPathOf(node);
+      const segments = folderPath === ROOT ? [] : folderPath.split("/");
+      let cursor = ROOT;
+      for (const segment of segments) {
+        const next = cursor === ROOT ? segment : `${cursor}/${segment}`;
+        ensureFolder(next);
+        ensureFolder(cursor).children.add(next);
+        cursor = next;
+      }
+      ensureFolder(cursor).leaves.push(node);
+    }
+
+    let leafIndex = 0;
+    const yOf = new Map<string, number>();
+    const depthOf = new Map<string, number>();
+
+    const visitFolder = (path: string, depth: number): void => {
+      const entry = folders.get(path)!;
+      for (const child of [...entry.children].sort()) visitFolder(child, depth + 1);
+      for (const leaf of [...entry.leaves].sort((a, b) => a.label.localeCompare(b.label))) {
+        depthOf.set(leaf.id, depth + 1);
+        yOf.set(leaf.id, leafIndex++);
+      }
+    };
+    visitFolder(ROOT, 0);
+
+    const maxDepth = Math.max(1, ...[...depthOf.values()]);
+    const depthSpan = Math.max(1, this.width - 240);
+    const leafSpan = Math.max(1, leafIndex - 1);
+    const rowHeight = Math.max(46, Math.min(90, (this.height - 120) / Math.max(1, leafSpan)));
+
+    const map = new Map<string, Point>();
+    for (const node of this.nodes) {
+      const depth = depthOf.get(node.id) ?? 0;
+      const y = yOf.get(node.id) ?? 0;
+      map.set(node.id, {
         x: (depth / maxDepth) * depthSpan - depthSpan / 2,
         y: (y - leafSpan / 2) * rowHeight
       });
@@ -565,7 +716,7 @@ export class PackageGraph {
 
   _setupZoom(): void {
     this.zoomBehavior = zoom<HTMLCanvasElement, unknown>()
-      .scaleExtent([0.15, 6])
+      .scaleExtent([0.04, 6])
       .filter((event: Event) => {
         if (event.type === "wheel") return true;
         if ((event as MouseEvent).button) return false;
@@ -582,6 +733,7 @@ export class PackageGraph {
       })
       .on("zoom", (event: D3ZoomEvent<HTMLCanvasElement, unknown>) => {
         this.transform = event.transform;
+        this.onZoomChange(event.transform.k);
         this.requestRender();
       });
 
@@ -744,7 +896,16 @@ export class PackageGraph {
       const active = edgeKey(edge) === edgeKey(this.selectedEdge);
       // Every edge gets a gentle arc (not just reciprocal pairs) so a dense graph reads as
       // a web rather than a ruler-straight tangle; reciprocal pairs arc further apart.
-      const curvature = reciprocal.has(`${s.id}|${t.id}`) ? (s.id < t.id ? 18 : -18) : s.id < t.id ? 9 : -9;
+      const curvature =
+        this.edgeCurvature === "straight"
+          ? 0
+          : reciprocal.has(`${s.id}|${t.id}`)
+            ? s.id < t.id
+              ? 18
+              : -18
+            : s.id < t.id
+              ? 9
+              : -9;
       const weight = clamp(0.6 + (edge.count / this.maxEdgeCount) * 1.8, 0.6, 2.4);
 
       let strokeStyle: string;
@@ -826,7 +987,9 @@ export class PackageGraph {
         ctx.fill();
       }
 
-      const showLabel = hoverSet ? hoverSet.has(node.id) : transform.k >= 1.3 || this.topDegreeIds.has(node.id);
+      const showLabel = hoverSet
+        ? hoverSet.has(node.id)
+        : transform.k >= this.labelZoomThreshold || this.topDegreeIds.has(node.id);
 
       if (showLabel && !dimmed) {
         const label = truncate(node.label, 26);

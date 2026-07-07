@@ -73,18 +73,27 @@ export function colorForKey(
   return `hsl(${hashHue(key)}, ${saturation}%, ${lightness}%)`;
 }
 
-// Top-level path segment - the "family" a package belongs to (e.g. "src/components/ui" -> "src").
+// The "family" a package belongs to, used to group siblings under one color/cluster.
+// Almost every real project nests everything under one generic top segment (src, app,
+// lib...), so using just that segment collapses the whole codebase into a single family -
+// one hue, one cluster. Taking the first two segments instead (e.g. "src/components",
+// "src/domain") gives each real module its own identity while still grouping deep siblings.
 export function packageFamily(id: string): string {
   if (!id || id === "(root)") return "(root)";
-  const idx = id.indexOf("/");
-  return idx === -1 ? id : id.slice(0, idx);
+  const parts = id.split("/");
+  return parts.length > 1 ? parts.slice(0, 2).join("/") : parts[0];
 }
 
-// Siblings under the same top-level family share a hue; deeper nesting gets lighter,
-// so related packages read as a color group instead of unrelated random hues.
+// Siblings under the same family share a hue range so related packages read as a color
+// group, but the exact folder gets its own bounded nudge off that base hue - otherwise
+// every folder nested the same number of levels under a family (e.g. "src/domain/user"
+// and "src/domain/billing") would render as one indistinguishable color.
 export function familyColor(id: string): string {
   const family = packageFamily(id);
-  const depth = id === family ? 0 : id.split("/").length - 1;
-  const lightness = Math.max(42, Math.min(72, 44 + depth * 7));
-  return `hsl(${hashHue(family)}, 58%, ${lightness}%)`;
+  if (id === family) return `hsl(${hashHue(family)}, 58%, 52%)`;
+  const baseHue = hashHue(family);
+  const leafHue = (baseHue + (hashHue(id) % 40) - 20 + 360) % 360;
+  const depth = id.split("/").length - family.split("/").length;
+  const lightness = Math.max(40, Math.min(70, 46 + depth * 4));
+  return `hsl(${leafHue}, 58%, ${lightness}%)`;
 }

@@ -38,12 +38,26 @@
           <div id="globalSearchResults" class="header-search-results" hidden></div>
         </div>
         <div class="app-header-actions">
+          <div class="size-toggle ui-mode-toggle" role="group" aria-label="Dashboard variant">
+            <button type="button" id="uiModePlus" class="size-toggle-btn is-active" data-ui-mode="plus">Plus</button>
+            <button type="button" id="uiModeOriginal" class="size-toggle-btn" data-ui-mode="original" title="Switch to the built-in codebase-memory-mcp graph UI">Original</button>
+          </div>
           <button type="button" id="adrButton" class="icon-button" title="Architecture Decision Record" aria-label="Architecture Decision Record" hidden>ADR</button>
           <button type="button" id="queryButton" class="icon-button" title="Cypher query console" aria-label="Cypher query console" hidden>Query</button>
           <button class="icon-button" id="shortcutsButton" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">?</button>
+          <button type="button" id="settingsButton" class="icon-button" title="Settings" aria-label="Settings">Settings</button>
           <button type="button" id="allProjectsButton" class="icon-button">All projects</button>
         </div>
       </header>
+
+      <section id="originalUiView" class="original-ui" hidden>
+        <div id="originalUiError" class="original-ui-error" hidden>
+          <p><strong>Can't reach the original dashboard</strong></p>
+          <p id="originalUiErrorMessage" class="empty">Make sure codebase-memory-mcp is running with <code>--ui=true</code>.</p>
+          <button type="button" id="originalUiRetry" class="icon-button is-active">Retry</button>
+        </div>
+        <iframe id="originalUiFrame" class="original-ui-frame" title="Original codebase-memory-mcp dashboard" hidden></iframe>
+      </section>
 
       <main id="homeView" class="home">
         <div class="home-head">
@@ -71,50 +85,81 @@
         <section class="main-grid">
           <div class="graph-panel">
             <div class="panel-head compact-head">
-              <h3 title="Scroll to zoom · drag to pan · click to inspect">Package Graph</h3>
+              <div class="graph-panel-title">
+                <h3 title="Scroll to zoom · drag to pan · click to inspect">Package Graph</h3>
+                <button
+                  type="button"
+                  id="filtersToggle"
+                  class="filters-toggle-btn"
+                  title="Hide relation filters"
+                  aria-expanded="true"
+                  aria-controls="graphFilters"
+                >
+                  <span class="chevron">▾</span>
+                </button>
+              </div>
               <div class="panel-head-actions">
-                <div class="size-toggle graph-mode-toggle" role="group" aria-label="Graph node granularity">
-                  <button type="button" id="graphModePackages" class="size-toggle-btn is-active" data-graph-mode="packages">Packages</button>
-                  <button type="button" id="graphModeSymbols" class="size-toggle-btn" data-graph-mode="symbols">Symbols</button>
+                <div class="toolbar-group">
+                  <div class="size-toggle graph-mode-toggle" role="group" aria-label="Graph node granularity">
+                    <button type="button" id="graphModePackages" class="size-toggle-btn is-active" data-graph-mode="packages">Packages</button>
+                    <button type="button" id="graphModeSymbols" class="size-toggle-btn" data-graph-mode="symbols">Symbols</button>
+                  </div>
+                  <select id="layoutMode" class="select select-ghost" aria-label="Graph layout">
+                    <option value="clustered" selected>Clustered</option>
+                    <option value="force">Force</option>
+                    <option value="radial">Radial</option>
+                    <option value="grid">Grid</option>
+                    <option value="tree">Tree</option>
+                  </select>
+                  <select id="graphFamily" class="select select-ghost" aria-label="Graph area filter">
+                    <option value="">All areas</option>
+                  </select>
+                  <select id="graphLimit" class="select select-ghost" aria-label="Graph node limit">
+                    <option value="30">30 nodes</option>
+                    <option value="60" selected>60 nodes</option>
+                    <option value="90">90 nodes</option>
+                    <option value="150">150 nodes</option>
+                    <option value="300">300 nodes</option>
+                    <option value="all">All nodes</option>
+                  </select>
                 </div>
-                <select id="layoutMode" class="select" aria-label="Graph layout">
-                  <option value="clustered" selected>Clustered</option>
-                  <option value="force">Force</option>
-                  <option value="radial">Radial</option>
-                  <option value="grid">Grid</option>
-                  <option value="tree">Tree</option>
-                </select>
-                <select id="graphFamily" class="select" aria-label="Graph area filter">
-                  <option value="">All areas</option>
-                </select>
-                <select id="graphLimit" class="select" aria-label="Graph node limit">
-                  <option value="30">30 nodes</option>
-                  <option value="60" selected>60 nodes</option>
-                  <option value="90">90 nodes</option>
-                  <option value="150">150 nodes</option>
-                  <option value="300">300 nodes</option>
-                  <option value="all">All nodes</option>
-                </select>
-                <button class="icon-button is-active" id="fitButton" title="Fit graph (f)" aria-label="Fit graph">Fit</button>
-                <button class="icon-button" id="isolateButton" title="Isolate neighbors (i)" aria-label="Isolate neighbors">Isolate</button>
-                <button class="icon-button" id="refreshButton" title="Refresh data (r)" aria-label="Refresh data">Refresh</button>
+                <span class="toolbar-divider" aria-hidden="true"></span>
+                <div class="toolbar-group">
+                  <div class="zoom-controls" role="group" aria-label="Zoom">
+                    <button type="button" class="icon-button zoom-button" id="zoomOutButton" title="Zoom out (-)" aria-label="Zoom out">&minus;</button>
+                    <button type="button" class="icon-button zoom-button" id="zoomResetButton" title="Reset zoom (0)" aria-label="Reset zoom">100%</button>
+                    <button type="button" class="icon-button zoom-button" id="zoomInButton" title="Zoom in (+)" aria-label="Zoom in">+</button>
+                  </div>
+                  <button class="icon-button is-active" id="fitButton" title="Fit graph (f)" aria-label="Fit graph">Fit</button>
+                  <button class="icon-button" id="isolateButton" title="Isolate neighbors (i)" aria-label="Isolate neighbors">Isolate</button>
+                  <button class="icon-button" id="refreshButton" title="Refresh data (r)" aria-label="Refresh data">Refresh</button>
+                </div>
               </div>
             </div>
-            <div class="graph-filters" aria-label="Graph filters">
-              <div id="edgeTypeFilters" class="filter-chips"></div>
-              <div class="graph-filters-right">
-                <div class="size-toggle" role="group" aria-label="Node size">
-                  <button type="button" id="sizeByCount" class="size-toggle-btn is-active">Symbols</button>
-                  <button type="button" id="sizeByDegree" class="size-toggle-btn">Links</button>
+            <div class="graph-filters" id="graphFilters" aria-label="Graph filters">
+              <div class="graph-filter-row">
+                <span class="graph-filter-row-label">Relation types</span>
+                <div id="edgeTypeFilters" class="filter-chips"></div>
+              </div>
+              <div class="graph-filter-row graph-filter-row-display">
+                <span class="graph-filter-row-label">Display</span>
+                <div class="graph-filters-right">
+                  <div class="weight-filter" title="Choose what node size represents">
+                    <span>Size by</span>
+                    <div class="size-toggle" role="group" aria-label="Node size">
+                      <button type="button" id="sizeByCount" class="size-toggle-btn is-active" title="Bigger node = more symbols (functions, classes, etc.) inside it">Symbols</button>
+                      <button type="button" id="sizeByDegree" class="size-toggle-btn" title="Bigger node = more connections to other nodes (weighted by relation count)">Links</button>
+                    </div>
+                  </div>
+                  <label class="weight-filter" title="Hide relations that occur fewer than this many times between two nodes">
+                    <span>Min weight</span>
+                    <input id="minWeight" class="weight-range" type="range" min="1" max="1" value="1" step="1" />
+                    <span id="minWeightValue" class="weight-value">1</span>
+                  </label>
                 </div>
-                <label class="weight-filter">
-                  <span>Min weight</span>
-                  <input id="minWeight" class="weight-range" type="range" min="1" max="1" value="1" step="1" />
-                  <span id="minWeightValue" class="weight-value">1</span>
-                </label>
               </div>
             </div>
-            <div class="graph-canvas-wrap">
+            <div class="graph-canvas-wrap" id="graphCanvasWrap">
               <canvas id="graph" role="img" aria-label="Package dependency graph"></canvas>
               <div id="graphTooltip" class="graph-tooltip" hidden></div>
               <div id="graphStatus" class="graph-status" hidden>
@@ -141,23 +186,14 @@
             </div>
 
             <div class="stat-strip" aria-label="Project metrics">
-              <div class="stat-grid">
-                <div class="stat">
-                  <span>Nodes</span>
-                  <strong id="nodesMetric">0</strong>
-                </div>
-                <div class="stat">
-                  <span>Edges</span>
-                  <strong id="edgesMetric">0</strong>
-                </div>
-                <div class="stat">
-                  <span>Packages</span>
-                  <strong id="packagesMetric">0</strong>
-                </div>
-                <div class="stat">
-                  <span>Largest package</span>
-                  <strong id="topPackageMetric">-</strong>
-                </div>
+              <div class="stat-line">
+                <span class="stat-item"><strong id="nodesMetric">0</strong> nodes</span>
+                <span class="stat-sep">·</span>
+                <span class="stat-item"><strong id="edgesMetric">0</strong> edges</span>
+                <span class="stat-sep">·</span>
+                <span class="stat-item"><strong id="packagesMetric">0</strong> packages</span>
+                <span class="stat-sep">·</span>
+                <span class="stat-item stat-item-wide">largest <strong id="topPackageMetric">-</strong></span>
               </div>
               <div id="indexHealth" class="index-health"></div>
             </div>
@@ -248,7 +284,8 @@
 
               <div class="insight-section">
                 <button type="button" id="perfToggle" class="insight-header" aria-expanded="false" aria-controls="perfPanel">
-                  <span>Perf risks</span> <span class="chevron">▾</span>
+                  <span class="insight-header-label">Perf risks <span id="perfBadge" class="insight-badge" hidden></span></span>
+                  <span class="chevron">▾</span>
                 </button>
                 <div id="perfPanel" class="composition-panel" hidden>
                   <div class="composition-col">
@@ -260,7 +297,8 @@
 
               <div class="insight-section">
                 <button type="button" id="duplicatesToggle" class="insight-header" aria-expanded="false" aria-controls="duplicatesPanel">
-                  <span>Duplicates</span> <span class="chevron">▾</span>
+                  <span class="insight-header-label">Duplicates <span id="duplicatesBadge" class="insight-badge" hidden></span></span>
+                  <span class="chevron">▾</span>
                 </button>
                 <div id="duplicatesPanel" class="composition-panel" hidden>
                   <div class="composition-col">
@@ -272,7 +310,8 @@
 
               <div class="insight-section">
                 <button type="button" id="impactToggle" class="insight-header" aria-expanded="false" aria-controls="impactPanel">
-                  <span>Impact</span> <span class="chevron">▾</span>
+                  <span class="insight-header-label">Impact <span id="impactBadge" class="insight-badge" hidden></span></span>
+                  <span class="chevron">▾</span>
                 </button>
                 <div id="impactPanel" class="composition-panel" hidden>
                   <div class="composition-col">
@@ -324,6 +363,10 @@
           <div><dt>F</dt><dd>Fit graph to view</dd></div>
           <div><dt>I</dt><dd>Toggle isolate neighbors</dd></div>
           <div><dt>R</dt><dd>Refresh current project</dd></div>
+          <div><dt>+ / =</dt><dd>Zoom in</dd></div>
+          <div><dt>-</dt><dd>Zoom out</dd></div>
+          <div><dt>0</dt><dd>Reset zoom</dd></div>
+          <div><dt>G</dt><dd>Toggle Packages / Symbols</dd></div>
           <div><dt>Esc</dt><dd>Clear selection, or close this dialog</dd></div>
           <div><dt>?</dt><dd>Toggle this help</dd></div>
         </dl>
@@ -398,6 +441,73 @@
           <button type="button" id="queryRun" class="icon-button is-active">Run</button>
         </div>
         <div id="queryResults" class="query-results"></div>
+      </div>
+    </div>
+
+    <div id="settingsDialog" class="shortcuts-overlay" hidden>
+      <div class="shortcuts-card wide-card" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+        <div class="shortcuts-head">
+          <h3 id="settingsTitle">Settings</h3>
+          <button type="button" id="settingsClose" class="icon-button" aria-label="Close">Close</button>
+        </div>
+
+        <div class="settings-group">
+          <h4>Appearance</h4>
+          <label class="weight-filter">
+            <span>Min node size</span>
+            <input id="settingRadiusMin" class="weight-range" type="range" min="3" max="16" step="1" />
+            <span id="settingRadiusMinValue" class="weight-value">7</span>
+          </label>
+          <label class="weight-filter">
+            <span>Max node size</span>
+            <input id="settingRadiusMax" class="weight-range" type="range" min="18" max="70" step="1" />
+            <span id="settingRadiusMaxValue" class="weight-value">36</span>
+          </label>
+          <label class="weight-filter">
+            <input type="checkbox" id="settingShowGrid" />
+            <span>Show canvas grid</span>
+          </label>
+          <label class="weight-filter">
+            <span>Edge style</span>
+            <select id="settingEdgeCurvature" class="select">
+              <option value="curved">Curved</option>
+              <option value="straight">Straight</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="settings-group">
+          <h4>Behavior</h4>
+          <label class="weight-filter">
+            <input type="checkbox" id="settingAutoFit" />
+            <span>Auto-fit view when filters or limits change</span>
+          </label>
+        </div>
+
+        <div class="settings-group">
+          <h4>Motion</h4>
+          <label class="weight-filter">
+            <input type="checkbox" id="settingReducedMotion" />
+            <span>Reduce motion (skip zoom/fit animations, calmer layout)</span>
+          </label>
+          <label class="weight-filter">
+            <span>Always-show label zoom threshold</span>
+            <input id="settingLabelThreshold" class="weight-range" type="range" min="1" max="3" step="0.1" />
+            <span id="settingLabelThresholdValue" class="weight-value">1.3</span>
+          </label>
+        </div>
+
+        <div class="settings-group">
+          <h4>Integrations</h4>
+          <label class="weight-filter">
+            <span>Original dashboard URL</span>
+            <input id="settingOriginalUiUrl" class="input" type="text" placeholder="http://localhost:9749" />
+          </label>
+        </div>
+
+        <div class="wide-card-actions">
+          <button type="button" id="settingsReset" class="icon-button">Reset to defaults</button>
+        </div>
       </div>
     </div>
 
