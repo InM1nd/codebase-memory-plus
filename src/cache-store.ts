@@ -18,6 +18,7 @@ export type CacheProjectStats = {
 
 export type ArchitectureFallback = {
   project: string;
+  root_path: string;
   total_nodes: number;
   total_edges: number;
   node_labels: Array<{ label: string; count: number }>;
@@ -179,6 +180,7 @@ export async function readArchitectureFallback(
 
     return {
       project: stats.project || projectName,
+      root_path: stats.root_path,
       total_nodes: stats.nodes,
       total_edges: stats.edges,
       node_labels: queryRows<{ label: string; count: number }>(

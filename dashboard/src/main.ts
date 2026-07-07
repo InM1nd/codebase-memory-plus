@@ -1,7 +1,7 @@
 import { ApiError, deleteJson, getJson, postJson, putJson } from "./api.js";
 import { PackageGraph, type SimEdge, type SimNode } from "./graph.js";
 import { defaultSettings, loadPrefs, savePrefs, type Settings } from "./storage.js";
-import { debounce, edgeKey, escapeHtml, formatNumber, packageFromFile, prettyName, truncate } from "./utils.js";
+import { debounce, edgeKey, escapeHtml, formatNumber, packageFromFile, prettyName, prettyPath } from "./utils.js";
 import type {
   AdrResult,
   ArchitectureInsights,
@@ -272,7 +272,7 @@ function renderBreadcrumb(): void {
   const has = Boolean(state.selectedNode);
   els.breadcrumb.hidden = !has;
   if (!has || !state.selectedNode) return;
-  els.breadcrumbProject.textContent = prettyName(state.activeProject ?? "");
+  els.breadcrumbProject.textContent = state.summary ? prettyPath(state.summary.root_path) : prettyName(state.activeProject ?? "");
   els.breadcrumbPackage.textContent = state.selectedNode.label;
 }
 
@@ -1028,7 +1028,7 @@ async function loadCrossRepoProjectList(): Promise<void> {
             (entry) => `
     <label class="cross-repo-project">
       <input type="checkbox" value="${escapeHtml(entry.project)}" />
-      <span>${escapeHtml(prettyName(entry.project))}</span>
+      <span title="${escapeHtml(entry.root_path)}">${escapeHtml(prettyPath(entry.root_path))}</span>
     </label>
   `
           )
@@ -1406,7 +1406,7 @@ type ProjectGroup = { key: string; items: ProjectGroupItem[] };
 function buildProjectGroups(projects: CachedProject[]): ProjectGroup[] {
   const groups = new Map<string, ProjectGroupItem[]>();
   for (const project of projects) {
-    const pretty = prettyName(project.project);
+    const pretty = prettyPath(project.root_path);
     const sepIndex = pretty.indexOf(" / ");
     const key = sepIndex === -1 ? pretty : pretty.slice(0, sepIndex);
     const suffix = sepIndex === -1 ? null : pretty.slice(sepIndex + 3);
@@ -1428,7 +1428,7 @@ function buildProjectGroups(projects: CachedProject[]): ProjectGroup[] {
 function sortProjects(projects: CachedProject[]): CachedProject[] {
   const sorted = [...projects];
   if (state.projectSort === "name") {
-    sorted.sort((a, b) => prettyName(a.project).localeCompare(prettyName(b.project)));
+    sorted.sort((a, b) => prettyPath(a.root_path).localeCompare(prettyPath(b.root_path)));
   } else if (state.projectSort === "recent") {
     const recent = loadPrefs().recentProjects;
     const rankOf = (project: CachedProject) => {
@@ -1485,7 +1485,7 @@ function renderRecentCard(project: CachedProject): HTMLButtonElement {
   card.className = `project-card recent-card ${project.project === state.activeProject ? "is-active" : ""}`;
   card.innerHTML = `
     <header class="project-card-head">
-      <h3>${escapeHtml(prettyName(project.project))}</h3>
+      <h3 title="${escapeHtml(project.root_path)}">${escapeHtml(prettyPath(project.root_path))}</h3>
     </header>
     <p class="project-card-meta">${formatNumber(project.nodes)} nodes · ${formatNumber(project.edges)} edges</p>
   `;
@@ -1520,7 +1520,7 @@ function renderProjectCard(group: ProjectGroup, forceExpand: boolean): HTMLEleme
     <p class="project-card-meta">${formatNumber(totalNodes)} nodes · ${formatNumber(totalEdges)} edges</p>
     <p class="project-card-path">
       ${!primary.project.path_exists ? `<span class="badge badge-missing">Missing</span>` : ""}
-      <span class="path-text">${escapeHtml(truncate(primary.project.root_path, 54))}</span>
+      <span class="path-text" title="${escapeHtml(primary.project.root_path)}">${escapeHtml(primary.project.root_path)}</span>
     </p>
   `;
 
@@ -1573,14 +1573,15 @@ function renderBranchRow(item: ProjectGroupItem): HTMLDivElement {
   row.className = `project-card-branch ${item.project.project === state.activeProject ? "is-active" : ""}`;
   row.setAttribute("role", "button");
   row.tabIndex = 0;
+  const branchLabel = item.suffix ?? "main";
   row.innerHTML = `
     <div class="project-card-branch-main">
       <span class="project-card-branch-label">
-        <span class="branch-name">${escapeHtml(truncate(item.suffix ?? "main", 22))}</span>
+        <span class="branch-name" title="${escapeHtml(branchLabel)}">${escapeHtml(branchLabel)}</span>
         ${item.project.nodes < 5 ? '<span class="badge badge-sparse">sparse</span>' : ""}
         ${!item.project.path_exists ? '<span class="badge badge-missing">Missing</span>' : ""}
       </span>
-      <span class="path-text">${escapeHtml(truncate(item.project.root_path, 48))}</span>
+      <span class="path-text" title="${escapeHtml(item.project.root_path)}">${escapeHtml(item.project.root_path)}</span>
     </div>
     <span class="project-card-branch-meta">${formatNumber(item.project.nodes)} nodes</span>
     <button type="button" class="project-card-delete" title="Remove from cache" aria-label="Remove from cache">Remove</button>
@@ -1790,7 +1791,8 @@ function setGraphStatus(mode: GraphStatusMode, message?: string): void {
 function renderSummary(): void {
   const summary = state.summary;
   if (!summary) return;
-  els.projectTitle.textContent = prettyName(summary.project);
+  els.projectTitle.textContent = prettyPath(summary.root_path);
+  els.projectTitle.title = summary.root_path;
   els.nodesMetric.textContent = formatNumber(summary.total_nodes);
   els.edgesMetric.textContent = formatNumber(summary.total_edges);
   els.packagesMetric.textContent = formatNumber(summary.total_packages ?? summary.packages.length);

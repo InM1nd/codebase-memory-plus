@@ -253,7 +253,11 @@ h1 {
 
 .project-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  /* auto-fit (not auto-fill): with few cards, auto-fill reserves invisible empty column
+     tracks that silently eat the 1fr free space, capping real cards at ~260px even when
+     the row has plenty of room - auto-fit collapses those empty tracks so real cards
+     actually expand to fill the row. */
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
   gap: 14px;
 }
 

@@ -52,6 +52,7 @@ export type GraphResponse = {
 
 export type ProjectSummary = {
   project: string;
+  root_path: string;
   total_nodes: number;
   total_edges: number;
   node_labels: Array<{ label: string; count: number }>;

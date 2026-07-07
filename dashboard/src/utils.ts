@@ -1,3 +1,8 @@
+// Fallback for when only the cache-key id string is available (e.g. a cross-repo link's
+// targetProject) - the id is the absolute root path with EVERY "/" replaced by "-", so this
+// can't tell a real path separator apart from a hyphen that's actually part of a folder or
+// worktree branch name (e.g. "cyclic-ethernet" reads back as "cyclic / ethernet"). Prefer
+// prettyPath() below whenever the real root_path is available, since it isn't lossy.
 export function prettyName(value: string): string {
   return value
     // Project names are the absolute root path with "/" replaced by "-" - strip the
@@ -5,6 +10,14 @@ export function prettyName(value: string): string {
     // so the display name isn't tied to any one machine's username or folder layout.
     .replace(/^(Users|home)-[^-]+-/, "")
     .replaceAll("-", " / ");
+}
+
+// Same idea as prettyName(), but built from the real filesystem path (real "/" separators),
+// so hyphens inside actual folder/branch names survive intact instead of getting split apart.
+export function prettyPath(rootPath: string): string {
+  return rootPath
+    .replace(/^\/(Users|home)\/[^/]+\//, "")
+    .replaceAll("/", " / ");
 }
 
 export function formatNumber(value: number | null | undefined): string {
