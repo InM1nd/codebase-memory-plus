@@ -1,31 +1,40 @@
 # Codebase Memory Plus
 
-Personal MCP layer on top of `codebase-memory-mcp`.
+Personal MCP layer + local dashboard on top of `codebase-memory-mcp`.
+The goal is to keep the original indexer and graph engine intact, while adding higher-level
+tools for visual summaries, route maps, symbol graphs, impact analysis, and a local dashboard.
 
-The goal is to keep the original indexer and graph engine intact, while adding higher-level tools for visual summaries, route maps, symbol graphs, impact analysis, and a local dashboard.
+This repo gives you two independent things, both built on the same local graph cache:
 
-## MVP
+- **An MCP server** (`codebase-memory-plus`) - one tool, `project_summary_visual`, for use from
+  any MCP-compatible AI agent (Claude Code, Cursor, Codex, etc.).
+- **A local web dashboard** - project picker, package/symbol dependency graphs, relation
+  filters, architecture/perf/duplicate insights, and a toggle to embed
+  `codebase-memory-mcp`'s own built-in graph UI alongside it.
 
-This first slice provides one MCP server with one tool:
+## Prerequisites
 
-- `project_summary_visual` - resolves a project, calls the underlying `codebase-memory-mcp`, and returns a readable project map with Mermaid output plus structured JSON.
-
-It also includes a local dashboard:
-
-- project picker from the local `codebase-memory-mcp` cache;
-- project graph stats;
-- package-level dependency graph;
-- node and edge type summaries;
-- symbol search.
+- **Node.js >= 22**
+- **`codebase-memory-mcp` already installed** and reachable as a command (on your `PATH`, or
+  pointed to via config - see [Configure](#configure)). This project only adds tooling on top
+  of it; it does not index code itself. At least one project needs to have been indexed by
+  `codebase-memory-mcp` before there's anything for the dashboard or the
+  `project_summary_visual` tool to show.
 
 ## Install
 
 ```bash
+git clone https://github.com/InM1nd/codebase-memory-plus.git
+cd codebase-memory-plus
 npm install
-npm run build
+npm run build            # compiles the MCP server to dist/
+npm run build:dashboard  # bundles the dashboard frontend to dashboard/app.js
 ```
 
-## Dashboard
+Both build steps are required - `dist/` and `dashboard/app.js` are gitignored build
+artifacts, not checked into the repo.
+
+## Use the dashboard
 
 ```bash
 npm run dashboard
@@ -37,21 +46,78 @@ Then open:
 http://127.0.0.1:5178
 ```
 
-The dashboard reads local graph databases from:
+The dashboard reads local graph databases from `~/.cache/codebase-memory-mcp`. Useful
+environment variables:
 
-```txt
-~/.cache/codebase-memory-mcp
-```
-
-Set a custom cache directory with:
+| Variable | Purpose | Default |
+|---|---|---|
+| `PORT` | Dashboard HTTP port | `5178` |
+| `HOST` | Dashboard bind address | `127.0.0.1` |
+| `CODEBASE_MEMORY_MCP_CACHE_DIR` | Custom cache directory to read projects from | `~/.cache/codebase-memory-mcp` |
 
 ```bash
-CODEBASE_MEMORY_MCP_CACHE_DIR=/path/to/cache npm run dashboard
+PORT=9000 CODEBASE_MEMORY_MCP_CACHE_DIR=/path/to/cache npm run dashboard
+```
+
+## Use the MCP server
+
+The server talks over stdio, so add it to your AI tool's MCP config, pointing at
+`dist/index.js` from where you cloned this repo.
+
+### Claude Code
+
+```bash
+claude mcp add codebase-memory-plus -- node /absolute/path/to/codebase-memory-plus/dist/index.js
+```
+
+Or add it manually to your Claude Code / Claude Desktop MCP config JSON:
+
+```json
+{
+  "mcpServers": {
+    "codebase-memory-plus": {
+      "command": "node",
+      "args": ["/absolute/path/to/codebase-memory-plus/dist/index.js"]
+    }
+  }
+}
+```
+
+### Cursor and other JSON-config MCP clients
+
+Same shape as above - add a `codebase-memory-plus` entry under `mcpServers` in whatever
+MCP config file the client reads (e.g. `~/.cursor/mcp.json`).
+
+### Codex
+
+Add this to the global Codex MCP config:
+
+```toml
+[mcp_servers.codebase-memory-plus]
+command = "node"
+args = ["/absolute/path/to/codebase-memory-plus/dist/index.js"]
+```
+
+### Optional: expose a bare `codebase-memory-plus` command
+
+Instead of pointing every client at `node .../dist/index.js`, you can link the package once:
+
+```bash
+npm link
+```
+
+This uses the `bin` entry in `package.json` to put `codebase-memory-plus` on your `PATH`, so
+MCP configs can use it directly:
+
+```toml
+[mcp_servers.codebase-memory-plus]
+command = "codebase-memory-plus"
 ```
 
 ## Configure
 
-Create `~/.codebase-memory-plus/config.json`:
+Create `~/.codebase-memory-plus/config.json` to point this tool at a non-default
+`codebase-memory-mcp` binary or cache directory:
 
 ```json
 {
@@ -68,25 +134,19 @@ Create `~/.codebase-memory-plus/config.json`:
 }
 ```
 
-If the config file is missing, `codebase-memory-plus` falls back to running `codebase-memory-mcp` from `PATH`.
+If the config file is missing, `codebase-memory-plus` falls back to running
+`codebase-memory-mcp` from `PATH`. All of the following can also be set via environment
+variables, which take priority over the config file:
 
-## Add To Codex
+| Variable | Overrides |
+|---|---|
+| `CODEBASE_MEMORY_PLUS_CONFIG` | Path to the config file itself (default `~/.codebase-memory-plus/config.json`) |
+| `CODEBASE_MEMORY_MCP_COMMAND` | `baseMcp.command` |
+| `CODEBASE_MEMORY_MCP_ARGS` | `baseMcp.args` (space-separated) |
 
-Add this to the global Codex MCP config:
+## Tool example
 
-```toml
-[mcp_servers.codebase-memory-plus]
-command = "/path/to/codebase-memory-plus/dist/index.js"
-```
-
-Or, after linking the package:
-
-```toml
-[mcp_servers.codebase-memory-plus]
-command = "codebase-memory-plus"
-```
-
-## Tool Example
+`project_summary_visual` input:
 
 ```json
 {
@@ -95,4 +155,5 @@ command = "codebase-memory-plus"
 }
 ```
 
-Set `includeIndexing` to `true` if the project is not indexed and you want the tool to run a fast index before summarizing.
+Set `includeIndexing` to `true` if the project is not indexed and you want the tool to run a
+fast index before summarizing.
