@@ -122,13 +122,13 @@ export class BaseMemoryClient {
     }
 
     const base = getBaseMcpCommand(this.config);
-    this.transport = new StdioClientTransport({
+    const transport = new StdioClientTransport({
       command: base.command,
       args: base.args,
       env: base.env
     });
 
-    this.client = new Client(
+    const client = new Client(
       {
         name: "codebase-memory-plus-bridge",
         version: "0.1.0"
@@ -138,7 +138,16 @@ export class BaseMemoryClient {
       }
     );
 
-    await this.client.connect(this.transport);
+    try {
+      await client.connect(transport);
+    } catch (error) {
+      this.client = undefined;
+      this.transport = undefined;
+      throw error;
+    }
+
+    this.client = client;
+    this.transport = transport;
   }
 }
 
