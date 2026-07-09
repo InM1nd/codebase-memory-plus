@@ -9,6 +9,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "build:dashboard": "esbuild dashboard/src/main.ts --bundle --outfile=dashboard/app.js --format=esm",
+    "prepare": "npm run build && npm run build:dashboard",
     "dev:dashboard": "esbuild dashboard/src/main.ts --bundle --outfile=dashboard/app.js --format=esm --watch",
     "predashboard": "npm run build:dashboard",
     "dashboard": "node ./dist/dashboard-server.js",
@@ -17,6 +18,13 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "typecheck:dashboard": "tsc -p dashboard/tsconfig.json --noEmit"
   },
+  "files": [
+    "dist/",
+    "dashboard/app.js",
+    "dashboard/index.html",
+    "dashboard/styles.css",
+    "docs/"
+  ],
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.17.4",
     "@types/sql.js": "^1.4.11",

@@ -27,12 +27,17 @@ This repo gives you two independent things, both built on the same local graph c
 git clone https://github.com/InM1nd/codebase-memory-plus.git
 cd codebase-memory-plus
 npm install
-npm run build            # compiles the MCP server to dist/
-npm run build:dashboard  # bundles the dashboard frontend to dashboard/app.js
 ```
 
-Both build steps are required - `dist/` and `dashboard/app.js` are gitignored build
-artifacts, not checked into the repo.
+`npm install` runs the `prepare` script, which builds both required gitignored artifacts:
+`dist/` for the MCP server and `dashboard/app.js` for the web dashboard.
+
+To rebuild manually after local changes:
+
+```bash
+npm run build
+npm run build:dashboard
+```
 
 ## Use the dashboard
 
