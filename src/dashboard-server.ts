@@ -217,7 +217,9 @@ async function handleApi(url: URL, request: IncomingMessage, response: ServerRes
       const impact = await baseClient.detectChanges(project);
       if (!impact) throw new Error("Empty response");
       if (typeof impact.error === "string") throw new Error(impact.error);
-      sendJson(response, 200, impact);
+      // detect_changes is a live working-tree diff, not a cached score - stamp when it ran
+      // so the dashboard can label it as volatile instead of a static Perf/Duplicates metric.
+      sendJson(response, 200, { ...impact, computed_at: Date.now() });
     } catch (error) {
       sendJson(response, 503, { error: `Impact view unavailable: ${mcpErrorMessage(error)}` });
     }
@@ -227,7 +229,8 @@ async function handleApi(url: URL, request: IncomingMessage, response: ServerRes
   const duplicatesMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/duplicates$/);
   if (duplicatesMatch) {
     const project = decodeURIComponent(duplicatesMatch[1]);
-    sendJson(response, 200, { results: await readDuplicates(project, config) });
+    const { items, total, suppressed } = await readDuplicates(project, config);
+    sendJson(response, 200, { results: items, total, suppressed });
     return;
   }
 
@@ -258,7 +261,8 @@ async function handleApi(url: URL, request: IncomingMessage, response: ServerRes
   const perfRisksMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/perf-risks$/);
   if (perfRisksMatch) {
     const project = decodeURIComponent(perfRisksMatch[1]);
-    sendJson(response, 200, { results: await readPerfRisks(project, config) });
+    const { items, total, suppressed } = await readPerfRisks(project, config);
+    sendJson(response, 200, { results: items, total, suppressed });
     return;
   }
 

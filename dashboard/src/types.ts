@@ -91,6 +91,7 @@ export type PerfRisk = {
   file?: string;
   qualifiedName: string;
   score: number;
+  isTooling: boolean;
   meta: SymbolMeta;
 };
 
@@ -197,6 +198,7 @@ export type ImpactResult = {
   changed_files?: string[];
   changed_count?: number;
   impacted_symbols?: ImpactedSymbol[];
+  computed_at?: number;
   error?: string;
 };
 
