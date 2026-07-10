@@ -1,4 +1,4 @@
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -523,23 +523,54 @@ export async function readRelatedSymbols(
   }).catch(() => []);
 }
 
+// Suppression/triage state for findings that were reviewed and are known-fixed or
+// deliberately deferred - lives in the target project's own repo (not this tool's cache)
+// so it survives reindex and travels with the project, like .cbmignore does for indexing.
+type BaselineEntry = { qualifiedName?: string; a?: string; b?: string; reason?: string; date?: string };
+type Baseline = { perfRisks?: BaselineEntry[]; duplicates?: BaselineEntry[] };
+
+function loadBaseline(rootPath: string | undefined): Baseline {
+  if (!rootPath) return {};
+  const path = join(rootPath, ".codebase-memory", "baseline.json");
+  if (!existsSync(path)) return {};
+  try {
+    return JSON.parse(readFileSync(path, "utf-8")) as Baseline;
+  } catch {
+    return {};
+  }
+}
+
+function projectRootPath(db: Database): string | undefined {
+  return queryRows<{ root_path: string }>(db, "SELECT root_path FROM projects LIMIT 1")[0]?.root_path;
+}
+
 export type PerfRisk = {
   id: string;
   label: string;
   file?: string;
   qualifiedName: string;
   score: number;
+  isTooling: boolean;
   meta: SymbolMeta;
 };
+
+// Build/dev scripts (seeds, audits, sanity checks) run outside prod runtime - a hot loop
+// there doesn't hit users the way one in src/components does, so it shouldn't rank the same.
+const TOOLING_PATH = /(^|\/)(scripts?|tooling|tools|seed[s]?|sanity)(\/|$)|[._-]?audit[._-]?/i;
+const TOOLING_SCORE_WEIGHT = 0.25;
+
+function isToolingPath(filePath: string | undefined): boolean {
+  return Boolean(filePath && TOOLING_PATH.test(filePath));
+}
 
 export async function readPerfRisks(
   projectName: string,
   config: PlusConfig,
   limit = 20
-): Promise<PerfRisk[]> {
+): Promise<{ items: PerfRisk[]; total: number; suppressed: number }> {
   const dbPath = projectDbPath(projectName, config);
   if (!existsSync(dbPath)) {
-    return [];
+    return { items: [], total: 0, suppressed: 0 };
   }
 
   return withDatabase(dbPath, (db) => {
@@ -553,17 +584,30 @@ export async function readPerfRisks(
       "SELECT name, qualified_name, file_path, properties FROM nodes WHERE label IN ('Function', 'Method')"
     );
 
+    const suppressedNames = new Set(
+      (loadBaseline(projectRootPath(db)).perfRisks ?? []).map((entry) => entry.qualifiedName).filter(Boolean)
+    );
+
     const risks: PerfRisk[] = [];
+    let suppressed = 0;
     for (const row of rows) {
       const meta = parseSymbolMeta(row.properties);
       if (!meta) continue;
 
-      const score =
+      const rawScore =
         (meta.transitiveLoopDepth ?? 0) * 10 +
         (meta.linearScanInLoop ?? 0) * 5 +
         (meta.unguardedRecursion ? 20 : 0) +
         (meta.allocInLoop ?? 0) * 2;
-      if (score <= 0) continue;
+      if (rawScore <= 0) continue;
+
+      if (suppressedNames.has(row.qualified_name)) {
+        suppressed += 1;
+        continue;
+      }
+
+      const tooling = isToolingPath(row.file_path);
+      const score = tooling ? rawScore * TOOLING_SCORE_WEIGHT : rawScore;
 
       risks.push({
         id: row.qualified_name,
@@ -571,12 +615,14 @@ export async function readPerfRisks(
         file: row.file_path,
         qualifiedName: row.qualified_name,
         score,
+        isTooling: tooling,
         meta
       });
     }
 
-    return risks.sort((a, b) => b.score - a.score).slice(0, limit);
-  }).catch(() => []);
+    const sorted = risks.sort((a, b) => b.score - a.score);
+    return { items: sorted.slice(0, limit), total: sorted.length, suppressed };
+  }).catch(() => ({ items: [], total: 0, suppressed: 0 }));
 }
 
 export type ApiSurfaceGroup = {
@@ -698,14 +744,18 @@ export type DuplicatePair = {
   b: { name: string; qualifiedName: string; file?: string };
 };
 
+function suppressedPairKey(a: string, b: string): string {
+  return [a, b].sort().join("::");
+}
+
 export async function readDuplicates(
   projectName: string,
   config: PlusConfig,
   limit = 30
-): Promise<DuplicatePair[]> {
+): Promise<{ items: DuplicatePair[]; total: number; suppressed: number }> {
   const dbPath = projectDbPath(projectName, config);
   if (!existsSync(dbPath)) {
-    return [];
+    return { items: [], total: 0, suppressed: 0 };
   }
 
   return withDatabase(dbPath, (db) => {
@@ -713,16 +763,34 @@ export async function readDuplicates(
       db,
       "SELECT source_id, target_id, properties FROM edges WHERE type = 'SIMILAR_TO'"
     );
-    if (!edgeRows.length) return [];
+    if (!edgeRows.length) return { items: [], total: 0, suppressed: 0 };
 
     const nodeIds = [...new Set(edgeRows.flatMap((edge) => [edge.source_id, edge.target_id]))];
     const nodeById = queryNodesByIds(db, nodeIds);
 
+    const suppressedPairs = new Set(
+      (loadBaseline(projectRootPath(db)).duplicates ?? [])
+        .filter((entry) => entry.a && entry.b)
+        .map((entry) => suppressedPairKey(entry.a!, entry.b!))
+    );
+
+    const seenPairs = new Set<string>();
     const pairs: DuplicatePair[] = [];
+    let suppressed = 0;
     for (const edge of edgeRows) {
       const a = nodeById.get(edge.source_id);
       const b = nodeById.get(edge.target_id);
       if (!a || !b) continue;
+
+      // SIMILAR_TO edges are stored in both directions - collapse A->B/B->A into one pair.
+      const pairKey = [edge.source_id, edge.target_id].sort((x, y) => x - y).join(":");
+      if (seenPairs.has(pairKey)) continue;
+      seenPairs.add(pairKey);
+
+      if (suppressedPairs.has(suppressedPairKey(a.qualified_name, b.qualified_name))) {
+        suppressed += 1;
+        continue;
+      }
 
       let jaccard = 0;
       let sameFile = false;
@@ -742,8 +810,9 @@ export async function readDuplicates(
       });
     }
 
-    return pairs.sort((x, y) => y.jaccard - x.jaccard).slice(0, limit);
-  }).catch(() => []);
+    const sorted = pairs.sort((x, y) => y.jaccard - x.jaccard);
+    return { items: sorted.slice(0, limit), total: sorted.length, suppressed };
+  }).catch(() => ({ items: [], total: 0, suppressed: 0 }));
 }
 
 export type FileChurn = {

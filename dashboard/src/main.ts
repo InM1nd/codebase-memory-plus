@@ -161,14 +161,17 @@ const els = {
   perfToggle: q<HTMLButtonElement>("#perfToggle"),
   perfPanel: q<HTMLDivElement>("#perfPanel"),
   perfStatus: q<HTMLParagraphElement>("#perfStatus"),
+  perfSuppressed: q<HTMLParagraphElement>("#perfSuppressed"),
   perfList: q<HTMLDivElement>("#perfList"),
   duplicatesToggle: q<HTMLButtonElement>("#duplicatesToggle"),
   duplicatesPanel: q<HTMLDivElement>("#duplicatesPanel"),
   duplicatesStatus: q<HTMLParagraphElement>("#duplicatesStatus"),
+  duplicatesSuppressed: q<HTMLParagraphElement>("#duplicatesSuppressed"),
   duplicatesList: q<HTMLDivElement>("#duplicatesList"),
   impactToggle: q<HTMLButtonElement>("#impactToggle"),
   impactPanel: q<HTMLDivElement>("#impactPanel"),
   impactStatus: q<HTMLParagraphElement>("#impactStatus"),
+  impactMeta: q<HTMLParagraphElement>("#impactMeta"),
   impactBody: q<HTMLDivElement>("#impactBody"),
   impactFiles: q<HTMLDivElement>("#impactFiles"),
   impactSymbols: q<HTMLDivElement>("#impactSymbols"),
@@ -860,13 +863,14 @@ function renderArchitecture(data: ArchitectureInsights): void {
     : `<p class="empty">No clusters found.</p>`;
 }
 
-function setInsightBadge(el: HTMLElement, count: number, highThreshold: number): void {
+function setInsightBadge(el: HTMLElement, count: number, highThreshold: number, isLive = false): void {
   if (count <= 0) {
     el.hidden = true;
     return;
   }
   el.textContent = String(count);
   el.classList.toggle("is-high", count >= highThreshold);
+  el.classList.toggle("is-live", isLive);
   el.hidden = false;
 }
 
@@ -879,10 +883,12 @@ async function loadPerfRisks(): Promise<void> {
   els.perfList.hidden = true;
 
   try {
-    const data = await getJson<{ results: PerfRisk[] }>(`/api/projects/${encodeURIComponent(state.activeProject)}/perf-risks`);
+    const data = await getJson<{ results: PerfRisk[]; total: number; suppressed: number }>(`/api/projects/${encodeURIComponent(state.activeProject)}/perf-risks`);
     state.perf = data.results;
     renderPerfRisks(data.results);
-    setInsightBadge(els.perfBadge, data.results.length, 5);
+    setInsightBadge(els.perfBadge, data.total, 5);
+    els.perfSuppressed.textContent = `${data.suppressed} suppressed`;
+    els.perfSuppressed.hidden = data.suppressed <= 0;
     els.perfStatus.hidden = true;
     els.perfList.hidden = false;
   } catch (error) {
@@ -909,6 +915,7 @@ function renderPerfRisks(risks: PerfRisk[]): void {
       <div class="arch-item-name">
         ${escapeHtml(risk.label)}
         <span class="arch-item-meta">· ${escapeHtml(risk.file ?? "")}</span>
+        ${risk.isTooling ? `<span class="chip">tooling</span>` : ""}
       </div>
       <div class="arch-cluster-nodes">${perfRiskChips(risk.meta ?? {})}</div>
       <button type="button" class="row-action" data-perf-trace="${index}">Trace</button>
@@ -935,12 +942,14 @@ async function loadDuplicates(): Promise<void> {
   els.duplicatesList.hidden = true;
 
   try {
-    const data = await getJson<{ results: DuplicatePair[] }>(
+    const data = await getJson<{ results: DuplicatePair[]; total: number; suppressed: number }>(
       `/api/projects/${encodeURIComponent(state.activeProject)}/duplicates`
     );
     state.duplicates = data.results;
     renderDuplicates(data.results);
-    setInsightBadge(els.duplicatesBadge, data.results.length, 3);
+    setInsightBadge(els.duplicatesBadge, data.total, 3);
+    els.duplicatesSuppressed.textContent = `${data.suppressed} suppressed`;
+    els.duplicatesSuppressed.hidden = data.suppressed <= 0;
     els.duplicatesStatus.hidden = true;
     els.duplicatesList.hidden = false;
   } catch (error) {
@@ -976,13 +985,18 @@ async function loadImpact(): Promise<void> {
   els.impactStatus.hidden = false;
   els.impactStatus.classList.remove("is-error");
   els.impactStatus.textContent = "Loading impact…";
+  els.impactMeta.hidden = true;
   els.impactBody.hidden = true;
 
   try {
     const data = await getJson<ImpactResult>(`/api/projects/${encodeURIComponent(state.activeProject)}/impact`);
     state.impact = data;
     renderImpact(data);
-    setInsightBadge(els.impactBadge, data.impacted_symbols?.length ?? data.changed_count ?? 0, 10);
+    setInsightBadge(els.impactBadge, data.impacted_symbols?.length ?? data.changed_count ?? 0, 10, true);
+    els.impactMeta.textContent = data.computed_at
+      ? `Live working-tree diff vs HEAD · computed ${new Date(data.computed_at).toLocaleTimeString()}`
+      : "Live working-tree diff vs HEAD";
+    els.impactMeta.hidden = false;
     els.impactStatus.hidden = true;
     els.impactBody.hidden = false;
   } catch (error) {

@@ -907,6 +907,14 @@ h2 {
   background: var(--risk-high);
 }
 
+/* Impact badge reflects a live git-diff at fetch time, not a static/cached score
+   like Perf risks or Duplicates - the dashed ring marks it as volatile. */
+.insight-badge.is-live {
+  background: transparent;
+  border: 1.5px dashed var(--risk-medium);
+  color: inherit;
+}
+
 .insight-badge[hidden] {
   display: none;
 }
