@@ -87,7 +87,13 @@ function listDirs(root: string): Array<{ name: string; path: string }> {
       .filter((item) => {
         if (item.isDirectory()) return true;
         // Skills are often symlinked from a canonical ~/.claude/skills copy.
-        if (item.isSymbolicLink()) return statSync(join(root, item.name)).isDirectory();
+        if (item.isSymbolicLink()) {
+          try {
+            return statSync(join(root, item.name)).isDirectory();
+          } catch {
+            return false;
+          }
+        }
         return false;
       })
       .map((item) => ({ name: item.name, path: join(root, item.name) }));

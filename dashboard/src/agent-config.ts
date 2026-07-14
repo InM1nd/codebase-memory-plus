@@ -31,6 +31,7 @@ const STATUS_OPTIONS = [
 type StatusFilter = (typeof STATUS_OPTIONS)[number]["value"];
 type SortMode = "name" | "type" | "status" | "tools";
 type StatusTone = "neutral" | "success" | "error";
+type ViewMode = "cards" | "table";
 
 type Filters = {
   tool: string;
@@ -40,6 +41,7 @@ type Filters = {
   sort: SortMode;
   search: string;
   duplicatesOnly: boolean;
+  view: ViewMode;
 };
 
 type PersistedFilters = Partial<Filters>;
@@ -60,7 +62,8 @@ const DEFAULT_FILTERS: Filters = {
   status: "",
   sort: "name",
   search: "",
-  duplicatesOnly: false
+  duplicatesOnly: false,
+  view: "cards"
 };
 
 const TOOL_OPTIONS = [
@@ -68,6 +71,11 @@ const TOOL_OPTIONS = [
   { value: "claude", label: "Claude" },
   { value: "cursor", label: "Cursor" },
   { value: "codex", label: "Codex" }
+];
+
+const VIEW_OPTIONS: Array<{ value: ViewMode; label: string }> = [
+  { value: "cards", label: "Cards" },
+  { value: "table", label: "Table" }
 ];
 
 const els = {
@@ -84,6 +92,7 @@ const els = {
   statusFilter: q<HTMLSelectElement>("#agentConfigStatusFilter"),
   sortSelect: q<HTMLSelectElement>("#agentConfigSort"),
   duplicatesOnly: q<HTMLButtonElement>("#agentConfigDuplicatesOnly"),
+  viewMode: q<HTMLDivElement>("#agentConfigViewMode"),
   status: q<HTMLParagraphElement>("#agentConfigStatus"),
   stats: q<HTMLDivElement>("#agentConfigStats"),
   mcpCount: q<HTMLButtonElement>("#agentConfigMcpCount"),
@@ -335,8 +344,8 @@ function variantHtml(entry: AgentConfigEntry): string {
   `;
 }
 
-function detailsBodyHtml(group: AgentConfigGroup): string {
-  const rows = group.entries
+function detailsRowsHtml(group: AgentConfigGroup): string {
+  return group.entries
     .map(
       (entry) => `
       <div class="agent-config-detail-row">
@@ -348,19 +357,34 @@ function detailsBodyHtml(group: AgentConfigGroup): string {
     `
     )
     .join("");
-  return `<div class="agent-config-details-body" hidden>${rows}</div>`;
 }
 
-function detailsToggleHtml(): string {
+// Tool-variant toggles and the source-path details live in one collapsed-by-default panel,
+// shared verbatim between the card and table views - only the wrapping element differs
+// (a <div> for cards, a <tr> for table rows), located by index via [data-details-panel].
+function expandPanelHtml(group: AgentConfigGroup, index: number, wrapTag: "div" | "tr" = "div"): string {
+  const isMulti = group.entries.length > 1;
+  const inner = `
+    ${isMulti ? `<div class="agent-config-variants">${group.entries.map((entry) => variantHtml(entry)).join("")}</div>` : ""}
+    <div class="agent-config-details-body">${detailsRowsHtml(group)}</div>
+  `;
+  if (wrapTag === "tr") {
+    return `<tr class="agent-config-details-row" data-details-panel="${index}" hidden><td colspan="6">${inner}</td></tr>`;
+  }
+  return `<div class="agent-config-expand" data-details-panel="${index}" hidden>${inner}</div>`;
+}
+
+function detailsToggleHtml(index: number, isMulti: boolean, toolCount: number): string {
+  const label = isMulti ? `${toolCount} tools` : "Details";
   return `
-    <button type="button" class="agent-config-details-toggle" data-details-toggle="true" aria-expanded="false">
-      <span>Details</span>
+    <button type="button" class="agent-config-details-toggle" data-details-toggle="${index}" aria-expanded="false">
+      <span>${escapeHtml(label)}</span>
       <span class="chevron" aria-hidden="true">▾</span>
     </button>
   `;
 }
 
-function cardHtml(group: AgentConfigGroup): string {
+function cardHtml(group: AgentConfigGroup, index: number): string {
   const status = groupStatus(group);
   const isDuplicate = state.duplicateNames.has(group.name);
   const isMulti = group.entries.length > 1;
@@ -376,10 +400,9 @@ function cardHtml(group: AgentConfigGroup): string {
           <div class="agent-config-card-meta">
             <span class="agent-config-type type-${escapeHtml(group.type)}">${escapeHtml(TYPE_LABELS[group.type])}</span>
             <span class="badge badge-${status}">${statusLabel(status)}</span>
-            ${isMulti ? `<span class="agent-config-group-count">${group.entries.length}</span>` : ""}
             ${isDuplicate ? `<span class="agent-config-duplicate">dup</span>` : ""}
             <span class="agent-config-card-location">${escapeHtml(locationMeta(group))}</span>
-            ${detailsToggleHtml()}
+            ${detailsToggleHtml(index, isMulti, group.entries.length)}
           </div>
         </div>
         <div class="agent-config-card-actions">
@@ -395,9 +418,63 @@ function cardHtml(group: AgentConfigGroup): string {
           }
         </div>
       </div>
-      ${isMulti ? `<div class="agent-config-variants">${group.entries.map((entry) => variantHtml(entry)).join("")}</div>` : ""}
-      ${detailsBodyHtml(group)}
+      ${expandPanelHtml(group, index, "div")}
     </article>
+  `;
+}
+
+function tableRowHtml(group: AgentConfigGroup, index: number): string {
+  const status = groupStatus(group);
+  const isDuplicate = state.duplicateNames.has(group.name);
+  const isMulti = group.entries.length > 1;
+  const singleEntry = isMulti ? null : group.entries[0];
+  const canEnableAll = group.entries.some((entry) => !entry.enabled);
+  const canDisableAll = group.entries.some((entry) => entry.enabled);
+  const tools = uniqueSorted(group.entries.map((entry) => entry.tool));
+
+  return `
+    <tr class="agent-config-table-row" data-group-key="${escapeHtml(group.key)}">
+      <td class="agent-config-table-name">
+        ${escapeHtml(group.name)}
+        ${isDuplicate ? `<span class="agent-config-duplicate">dup</span>` : ""}
+      </td>
+      <td><span class="agent-config-type type-${escapeHtml(group.type)}">${escapeHtml(TYPE_LABELS[group.type])}</span></td>
+      <td><span class="badge badge-${status}">${statusLabel(status)}</span></td>
+      <td class="agent-config-table-tools">${tools.map((tool) => toolPill(tool)).join("")}</td>
+      <td class="agent-config-table-location">${escapeHtml(locationMeta(group))}</td>
+      <td class="agent-config-table-actions">
+        ${
+          isMulti
+            ? `<div class="agent-config-bulk-actions">
+                 <button type="button" class="row-action" data-bulk-enabled="true" data-group-key="${escapeHtml(group.key)}" ${!canEnableAll ? "disabled" : ""}>All on</button>
+                 <button type="button" class="row-action" data-bulk-enabled="false" data-group-key="${escapeHtml(group.key)}" ${!canDisableAll ? "disabled" : ""}>All off</button>
+               </div>`
+            : singleEntry
+              ? variantActionsHtml(singleEntry)
+              : ""
+        }
+        ${detailsToggleHtml(index, isMulti, group.entries.length)}
+      </td>
+    </tr>
+    ${expandPanelHtml(group, index, "tr")}
+  `;
+}
+
+function tableHtml(groups: AgentConfigGroup[]): string {
+  return `
+    <table class="agent-config-table">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Status</th>
+          <th>Tools</th>
+          <th>Scope</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>${groups.map((group, index) => tableRowHtml(group, index)).join("")}</tbody>
+    </table>
   `;
 }
 
@@ -462,12 +539,24 @@ function renderFilters(): void {
   els.duplicatesOnly.classList.toggle("is-off", !state.filters.duplicatesOnly);
   els.duplicatesOnly.classList.toggle("is-active", state.filters.duplicatesOnly);
   els.sortSelect.value = state.filters.sort;
+  renderFilterGroup(els.viewMode, VIEW_OPTIONS, state.filters.view, (value) => {
+    state.filters.view = value as ViewMode;
+    persistFilters();
+    renderFilters();
+    renderCards();
+  });
 }
 
 function renderCards(): void {
   const { groups, total } = filteredAndSortedGroups();
   renderResultCount(groups.length, total);
-  els.cards.innerHTML = groups.length ? `<div class="agent-config-grid">${groups.map((group) => cardHtml(group)).join("")}</div>` : emptyStateHtml();
+  if (!groups.length) {
+    els.cards.innerHTML = emptyStateHtml();
+  } else if (state.filters.view === "table") {
+    els.cards.innerHTML = tableHtml(groups);
+  } else {
+    els.cards.innerHTML = `<div class="agent-config-grid">${groups.map((group, index) => cardHtml(group, index)).join("")}</div>`;
+  }
   renderStats();
 
   els.cards.querySelectorAll<HTMLButtonElement>("[data-toggle-id]").forEach((button) => {
@@ -489,10 +578,11 @@ function renderCards(): void {
   });
   els.cards.querySelectorAll<HTMLButtonElement>("[data-details-toggle]").forEach((button) => {
     button.addEventListener("click", () => {
-      const body = button.closest(".agent-config-card")?.querySelector<HTMLElement>(".agent-config-details-body");
-      if (!body) return;
-      const nextOpen = body.hidden;
-      body.hidden = !nextOpen;
+      const index = button.dataset.detailsToggle;
+      const panel = index ? els.cards.querySelector<HTMLElement>(`[data-details-panel="${index}"]`) : null;
+      if (!panel) return;
+      const nextOpen = panel.hidden;
+      panel.hidden = !nextOpen;
       button.classList.toggle("is-open", nextOpen);
       button.setAttribute("aria-expanded", nextOpen ? "true" : "false");
     });

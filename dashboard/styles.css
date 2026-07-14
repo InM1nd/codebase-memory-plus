@@ -2276,13 +2276,18 @@ h4 {
   color: var(--accent);
 }
 
+.agent-config-view-toggle {
+  margin-left: auto;
+}
+
 .agent-config-cards {
   min-height: 80px;
 }
 
 .agent-config-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  align-items: start;
   gap: 8px;
   max-width: none;
 }
@@ -2305,13 +2310,16 @@ h4 {
 
 .agent-config-card-top {
   display: grid;
-  grid-template-columns: minmax(180px, 280px) minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 18px;
+  gap: 12px;
 }
 
 .agent-config-card-main {
-  display: contents;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 4px;
 }
 
 .agent-config-card-name {
@@ -2596,14 +2604,14 @@ h4 {
   transform: rotate(180deg);
 }
 
+.agent-config-expand {
+  margin-top: 4px;
+}
+
 .agent-config-details-body {
   display: grid;
   gap: 4px;
   margin-top: 4px;
-}
-
-.agent-config-details-body[hidden] {
-  display: none;
 }
 
 .agent-config-detail-row {
@@ -2636,18 +2644,76 @@ h4 {
 
 @media (max-width: 760px) {
   .agent-config-card-top {
-    grid-template-columns: minmax(0, 1fr) auto;
     align-items: start;
-    gap: 10px;
-  }
-
-  .agent-config-card-meta {
-    grid-column: 1 / -1;
   }
 
   .agent-config-variants {
     grid-template-columns: minmax(0, 1fr);
   }
+}
+
+.agent-config-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.agent-config-table th,
+.agent-config-table td {
+  border-bottom: 1px solid var(--hairline);
+  padding: 7px 10px;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.agent-config-table th {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.agent-config-table-row:hover {
+  background: var(--panel-2);
+}
+
+.agent-config-table-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+
+.agent-config-table-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.agent-config-table-location {
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.agent-config-table-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  text-align: right;
+}
+
+.agent-config-details-row td {
+  border-bottom: 1px solid var(--hairline);
+  background: var(--surface-sunken);
+  padding: 8px 10px;
+}
+
+.agent-config-details-row .agent-config-variants {
+  border-top: none;
+  padding-top: 0;
 }
 
 .agent-config-empty-state {
