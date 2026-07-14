@@ -214,3 +214,41 @@ export type QueryResult = {
   total?: number;
   error?: string;
 };
+
+export type AgentConfigType = "mcp" | "skill" | "plugin";
+export type AgentConfigTool = "claude" | "cursor" | "codex";
+export type AgentConfigScope = "global" | "project";
+
+export type AgentConfigEntry = {
+  id: string;
+  name: string;
+  type: AgentConfigType;
+  tool: AgentConfigTool;
+  scope: AgentConfigScope;
+  project_path: string | null;
+  enabled: boolean;
+  source_path: string;
+  raw_config: Record<string, unknown>;
+};
+
+export type AgentConfigResponse = {
+  entries: AgentConfigEntry[];
+};
+
+export type DuplicateGroup = {
+  name: string;
+  entries: AgentConfigEntry[];
+};
+
+export type AgentConfigDuplicatesResponse = {
+  duplicates: DuplicateGroup[];
+};
+
+export type AgentConfigMutationResult = {
+  dryRun: boolean;
+  applied: boolean;
+  usedNativeCli: boolean;
+  diff: string;
+  backupPath?: string;
+  error?: string;
+};

@@ -7,6 +7,7 @@ import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { BaseMemoryClient } from "./base-memory-client.js";
+import { deleteAgentConfig, findDuplicates, scanAgentConfig, toggleAgentConfig } from "./agent-config-scanner.js";
 import {
   hasEmbeddings,
   listCachedProjects,
@@ -334,7 +335,78 @@ async function handleApi(url: URL, request: IncomingMessage, response: ServerRes
     return;
   }
 
+  if (url.pathname === "/api/agent-config") {
+    const entries = await scanAgentConfigEntries(url);
+    sendJson(response, 200, { entries });
+    return;
+  }
+
+  if (url.pathname === "/api/agent-config/duplicates") {
+    const entries = await scanAgentConfigEntries(url);
+    sendJson(response, 200, { duplicates: findDuplicates(entries) });
+    return;
+  }
+
+  const agentConfigToggleMatch = url.pathname.match(/^\/api\/agent-config\/([^/]+)\/toggle$/);
+  if (agentConfigToggleMatch) {
+    if (request.method !== "POST") {
+      sendJson(response, 405, { error: "Method not allowed" });
+      return;
+    }
+    const id = decodeURIComponent(agentConfigToggleMatch[1]);
+    const dryRun = url.searchParams.get("dryRun") === "true";
+    try {
+      const body = await readJsonBody(request);
+      if (typeof body.enabled !== "boolean") {
+        sendJson(response, 400, { error: "Missing boolean 'enabled' in body" });
+        return;
+      }
+      const entry = (await scanAgentConfigEntries(url)).find((item) => item.id === id);
+      if (!entry) {
+        sendJson(response, 404, { error: "Entry not found" });
+        return;
+      }
+      const result = await toggleAgentConfig(entry, body.enabled, dryRun);
+      sendJson(response, 200, result);
+    } catch (error) {
+      sendJson(response, 500, { error: error instanceof Error ? error.message : "Toggle failed" });
+    }
+    return;
+  }
+
+  const agentConfigDeleteMatch = url.pathname.match(/^\/api\/agent-config\/([^/]+)$/);
+  if (agentConfigDeleteMatch) {
+    if (request.method !== "DELETE") {
+      sendJson(response, 405, { error: "Method not allowed" });
+      return;
+    }
+    const id = decodeURIComponent(agentConfigDeleteMatch[1]);
+    const dryRun = url.searchParams.get("dryRun") === "true";
+    try {
+      const entry = (await scanAgentConfigEntries(url)).find((item) => item.id === id);
+      if (!entry) {
+        sendJson(response, 404, { error: "Entry not found" });
+        return;
+      }
+      const result = await deleteAgentConfig(entry, dryRun);
+      sendJson(response, 200, result);
+    } catch (error) {
+      sendJson(response, 500, { error: error instanceof Error ? error.message : "Delete failed" });
+    }
+    return;
+  }
+
   sendJson(response, 404, { error: "Unknown API route" });
+}
+
+async function scanAgentConfigEntries(url: URL) {
+  const roots = (await listCachedProjects(config)).map((project) => project.root_path);
+  return scanAgentConfig(roots, {
+    tool: url.searchParams.get("tool") ?? undefined,
+    type: url.searchParams.get("type") ?? undefined,
+    scope: url.searchParams.get("scope") ?? undefined,
+    project: url.searchParams.get("project") ?? undefined
+  });
 }
 
 async function searchProject(project: string, q: string, label?: string): Promise<{

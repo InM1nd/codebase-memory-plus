@@ -36,6 +36,7 @@
     "d3-transition": "^3.0.1",
     "d3-zoom": "^3.0.0",
     "sql.js": "^1.14.1",
+    "toml": "^4.1.2",
     "zod": "^3.25.76"
   },
   "devDependencies": {

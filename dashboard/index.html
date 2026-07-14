@@ -42,10 +42,16 @@
             <button type="button" id="uiModePlus" class="size-toggle-btn is-active" data-ui-mode="plus">Plus</button>
             <button type="button" id="uiModeOriginal" class="size-toggle-btn" data-ui-mode="original" title="Switch to the built-in codebase-memory-mcp graph UI">Original</button>
           </div>
-          <button type="button" id="adrButton" class="icon-button" title="Architecture Decision Record" aria-label="Architecture Decision Record" hidden>ADR</button>
-          <button type="button" id="queryButton" class="icon-button" title="Cypher query console" aria-label="Cypher query console" hidden>Query</button>
           <button class="icon-button" id="shortcutsButton" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">?</button>
-          <button type="button" id="settingsButton" class="icon-button" title="Settings" aria-label="Settings">Settings</button>
+          <div class="more-menu" id="moreMenu">
+            <button type="button" id="moreMenuButton" class="icon-button" aria-haspopup="true" aria-expanded="false" aria-controls="moreMenuPanel" title="More" aria-label="More actions">&hellip;</button>
+            <div id="moreMenuPanel" class="more-menu-panel" role="menu" hidden>
+              <button type="button" id="adrButton" class="more-menu-item" role="menuitem" title="Architecture Decision Record" aria-label="Architecture Decision Record" hidden>ADR</button>
+              <button type="button" id="queryButton" class="more-menu-item" role="menuitem" title="Cypher query console" aria-label="Cypher query console" hidden>Query</button>
+              <button type="button" id="settingsButton" class="more-menu-item" role="menuitem" title="Settings" aria-label="Settings">Settings</button>
+              <button type="button" id="agentConfigButton" class="more-menu-item" role="menuitem" title="Agent Config" aria-label="Agent Config">Agent Config</button>
+            </div>
+          </div>
           <button type="button" id="allProjectsButton" class="icon-button">All projects</button>
         </div>
       </header>
@@ -352,6 +358,52 @@
             </div>
           </aside>
         </section>
+      </section>
+
+      <section id="agentConfigView" class="agent-config-view" hidden>
+        <div class="home-head">
+          <div>
+            <p class="eyebrow">Agent Config</p>
+            <h2>MCP servers, skills &amp; plugins</h2>
+          </div>
+          <div class="home-head-actions">
+            <button type="button" id="agentConfigRefresh" class="icon-button">Refresh</button>
+          </div>
+        </div>
+
+        <div class="agent-config-filters">
+          <div class="agent-config-filter-group">
+            <span class="graph-filter-row-label">Tool</span>
+            <div id="agentConfigToolFilter" class="size-toggle" role="group" aria-label="Filter by tool"></div>
+          </div>
+          <div class="agent-config-filter-group">
+            <span class="graph-filter-row-label">Type</span>
+            <div id="agentConfigTypeFilter" class="size-toggle" role="group" aria-label="Filter by type"></div>
+          </div>
+          <div class="agent-config-filter-group">
+            <span class="graph-filter-row-label">Scope</span>
+            <div id="agentConfigScopeFilter" class="size-toggle" role="group" aria-label="Filter by scope"></div>
+          </div>
+          <button type="button" id="agentConfigDuplicatesOnly" class="filter-chip">Duplicates only</button>
+        </div>
+
+        <p id="agentConfigStatus" class="empty">Loading agent config…</p>
+        <div id="agentConfigTableWrap" class="agent-config-table-wrap" hidden>
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Type</th>
+                <th>Tool</th>
+                <th>Scope</th>
+                <th>Project</th>
+                <th>Enabled</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="agentConfigTableBody"></tbody>
+          </table>
+        </div>
       </section>
     </div>
 

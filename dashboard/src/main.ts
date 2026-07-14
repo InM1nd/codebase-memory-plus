@@ -1,4 +1,5 @@
 import { ApiError, deleteJson, getJson, postJson, putJson } from "./api.js";
+import { showAgentConfig } from "./agent-config.js";
 import { PackageGraph, type SimEdge, type SimNode } from "./graph.js";
 import { defaultSettings, loadPrefs, savePrefs, type Settings } from "./storage.js";
 import { debounce, edgeKey, escapeHtml, formatNumber, packageFromFile, prettyName, prettyPath } from "./utils.js";
@@ -105,6 +106,10 @@ const els = {
   recentProjectsGrid: q<HTMLDivElement>("#recentProjectsGrid"),
   homeButton: q<HTMLButtonElement>("#homeButton"),
   allProjectsButton: q<HTMLButtonElement>("#allProjectsButton"),
+  agentConfigButton: q<HTMLButtonElement>("#agentConfigButton"),
+  moreMenu: q<HTMLDivElement>("#moreMenu"),
+  moreMenuButton: q<HTMLButtonElement>("#moreMenuButton"),
+  moreMenuPanel: q<HTMLDivElement>("#moreMenuPanel"),
   projectTitle: q<HTMLHeadingElement>("#projectTitle"),
   breadcrumb: q<HTMLElement>("#breadcrumb"),
   breadcrumbProject: q<HTMLSpanElement>("#breadcrumbProject"),
@@ -308,6 +313,7 @@ function bindEvents(): void {
   });
   els.homeButton.addEventListener("click", () => showHome());
   els.allProjectsButton.addEventListener("click", () => showHome());
+  els.agentConfigButton.addEventListener("click", () => showAgentConfig());
   els.uiModePlus.addEventListener("click", () => setUiMode("plus"));
   els.uiModeOriginal.addEventListener("click", () => setUiMode("original"));
   els.originalUiRetry.addEventListener("click", () => void loadOriginalUi());
@@ -347,6 +353,13 @@ function bindEvents(): void {
   els.searchLabelFilter.addEventListener("change", () => void searchSymbols());
   document.addEventListener("mousedown", (event) => {
     if (!els.headerSearch.contains(event.target as Node)) showSearchResults(false);
+  });
+  els.moreMenuButton.addEventListener("click", () => toggleMoreMenu(els.moreMenuPanel.hidden));
+  els.moreMenuPanel.addEventListener("click", (event) => {
+    if ((event.target as HTMLElement).closest("button")) toggleMoreMenu(false);
+  });
+  document.addEventListener("mousedown", (event) => {
+    if (!els.moreMenu.contains(event.target as Node)) toggleMoreMenu(false);
   });
   els.breadcrumbClear.addEventListener("click", () => clearSelection());
   els.detailsTabSelection.addEventListener("click", () => setDetailsTab("selection"));
@@ -447,6 +460,11 @@ function toggleShortcuts(show: boolean): void {
 function toggleSettings(show: boolean): void {
   els.settingsDialog.hidden = !show;
   if (show) applySettingsToUi(loadPrefs());
+}
+
+function toggleMoreMenu(show: boolean): void {
+  els.moreMenuPanel.hidden = !show;
+  els.moreMenuButton.setAttribute("aria-expanded", String(show));
 }
 
 function applySettingsToUi(settings: Settings): void {
@@ -1233,6 +1251,10 @@ function handleGlobalKeydown(event: KeyboardEvent): void {
     target instanceof HTMLElement && (target.matches("input, textarea, select") || target.isContentEditable);
 
   if (event.key === "Escape") {
+    if (!els.moreMenuPanel.hidden) {
+      toggleMoreMenu(false);
+      return;
+    }
     if (!els.traceDialog.hidden) {
       toggleTrace(false);
       return;

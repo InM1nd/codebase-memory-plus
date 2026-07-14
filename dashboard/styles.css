@@ -69,6 +69,48 @@ select {
   gap: 8px;
 }
 
+.more-menu {
+  position: relative;
+}
+
+.more-menu-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  min-width: 160px;
+  border: 1px solid var(--hairline-strong);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  padding: 4px;
+}
+
+.more-menu-panel[hidden] {
+  display: none;
+}
+
+.more-menu-item {
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 12px;
+  text-align: left;
+  padding: 8px 10px;
+}
+
+.more-menu-item:hover {
+  background: var(--panel-2);
+}
+
+.more-menu-item[hidden] {
+  display: none;
+}
+
 .brand {
   display: flex;
   align-items: center;
@@ -2027,4 +2069,73 @@ h4 {
   color: var(--muted);
   font-size: 10px;
   text-transform: uppercase;
+}
+
+/* Agent Config view */
+
+.agent-config-view {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 24px 28px;
+  overflow: auto;
+}
+
+.agent-config-view[hidden] {
+  display: none;
+}
+
+.agent-config-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+}
+
+.agent-config-filter-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.agent-config-table-wrap {
+  overflow: auto;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+}
+
+.agent-config-table-wrap[hidden] {
+  display: none;
+}
+
+.agent-config-table-wrap table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.agent-config-table-wrap th,
+.agent-config-table-wrap td {
+  border-bottom: 1px solid var(--hairline);
+  padding: 8px 10px;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.agent-config-table-wrap th {
+  position: sticky;
+  top: 0;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.agent-config-table-wrap tbody tr:hover {
+  background: var(--panel-2);
+}
+
+.agent-config-row-actions {
+  display: flex;
+  gap: 6px;
 }
