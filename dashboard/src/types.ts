@@ -218,6 +218,7 @@ export type QueryResult = {
 export type AgentConfigType = "mcp" | "skill" | "plugin";
 export type AgentConfigTool = "claude" | "cursor" | "codex";
 export type AgentConfigScope = "global" | "project";
+export type AgentConfigOrigin = "user" | "plugin";
 
 export type AgentConfigEntry = {
   id: string;
@@ -228,7 +229,11 @@ export type AgentConfigEntry = {
   project_path: string | null;
   enabled: boolean;
   source_path: string;
+  origin: AgentConfigOrigin;
   raw_config: Record<string, unknown>;
+  usage_count?: number;
+  last_used_at?: number;
+  has_hooks?: boolean;
 };
 
 export type AgentConfigResponse = {

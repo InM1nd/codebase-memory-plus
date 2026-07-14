@@ -405,7 +405,8 @@ async function scanAgentConfigEntries(url: URL) {
     tool: url.searchParams.get("tool") ?? undefined,
     type: url.searchParams.get("type") ?? undefined,
     scope: url.searchParams.get("scope") ?? undefined,
-    project: url.searchParams.get("project") ?? undefined
+    project: url.searchParams.get("project") ?? undefined,
+    origin: url.searchParams.get("origin") ?? undefined
   });
 }
 

@@ -5,6 +5,7 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   renameSync,
   rmSync,
   statSync,
@@ -22,6 +23,12 @@ const DISABLED_SUFFIX = ".disabled";
 export type AgentConfigType = "mcp" | "skill" | "plugin";
 export type AgentConfigTool = "claude" | "cursor" | "codex";
 export type AgentConfigScope = "global" | "project";
+// "plugin" = the skill's real file lives under some plugin's `plugins/cache/**` (or, for
+// Codex, `.tmp/bundled-marketplaces/**`) and is only mirrored into the tool's skills dir by
+// symlink - it renders/counts fine as a skill, but it's plugin-internal, not something the
+// user curated by hand. Everything else (real dirs, or symlinks to another *user* skill dir
+// for cross-tool sync) is "user".
+export type AgentConfigOrigin = "user" | "plugin";
 
 export type AgentConfigEntry = {
   id: string;
@@ -32,7 +39,18 @@ export type AgentConfigEntry = {
   project_path: string | null;
   enabled: boolean;
   source_path: string;
+  origin: AgentConfigOrigin;
   raw_config: Record<string, unknown>;
+  // Real invocation counts, when available. Claude Code tracks these itself in
+  // ~/.claude.json (skillUsage / pluginUsage) - undefined for tools/types we can't read
+  // usage for, not "0 uses".
+  usage_count?: number;
+  last_used_at?: number;
+  // Whether the plugin's own manifest registers hooks (SessionStart etc.) - that's what
+  // actually makes a plugin "always active" every session (e.g. ponytail/caveman injecting
+  // their mode instructions), completely independent of whether its skills are enabled.
+  // Only computed for Claude plugin entries where we know the install path.
+  has_hooks?: boolean;
 };
 
 export type DuplicateGroup = {
@@ -114,6 +132,29 @@ function skillFrontmatterName(skillMdPath: string, fallback: string): string {
   return fallback;
 }
 
+// Resolves through the symlink chain (a cross-tool mirror may itself point at another
+// symlink) to see where the skill's real files live - inside some plugin's own cache dir,
+// or Codex's bundled-marketplace temp dir, marks it "plugin"; anything else is "user".
+function skillOrigin(skillPath: string): AgentConfigOrigin {
+  try {
+    const real = realpathSync(skillPath);
+    const isPluginInternal = real.includes("/plugins/cache/") || real.includes("/.tmp/bundled-marketplaces/");
+    return isPluginInternal ? "plugin" : "user";
+  } catch {
+    return "user";
+  }
+}
+
+// Plugin manifests declare hooks either inline (`"hooks": {"SessionStart": [...]}`) or as a
+// path to a separate file (`"hooks": "./hooks/foo.json"`) - either way, presence of the key
+// is enough to know the plugin wires up automatic behavior beyond its listed skills.
+function pluginHasHooks(installPath: string | undefined): boolean | undefined {
+  if (!installPath) return undefined;
+  const manifest = safeReadJson(join(installPath, ".claude-plugin", "plugin.json"));
+  if (!manifest) return undefined;
+  return Boolean(manifest.hooks);
+}
+
 // Skills are the one type toggled by folder rename (mySkill <-> mySkill.disabled), so
 // "enabled" has to be read back off the directory name rather than any config file.
 function scanSkills(
@@ -136,6 +177,7 @@ function scanSkills(
         project_path: projectPath,
         enabled: !disabled,
         source_path: dir.path,
+        origin: skillOrigin(dir.path),
         raw_config: { skill_md_path: skillMd }
       });
     });
@@ -156,6 +198,7 @@ function scanClaudeMcp(json: Record<string, unknown> | undefined, scope: AgentCo
       project_path: projectPath,
       enabled: true,
       source_path: claudeJsonPath(),
+      origin: "user",
       raw_config: raw
     })
   );
@@ -174,6 +217,7 @@ function scanClaudeGlobal(): AgentConfigEntry[] {
   const installed = safeReadJson(installedPluginsPath);
   const plugins = (installed?.plugins ?? {}) as Record<string, unknown>;
   for (const [name, raw] of Object.entries(plugins)) {
+    const installPath = Array.isArray(raw) ? (raw[0] as Record<string, unknown> | undefined)?.installPath : undefined;
     entries.push(
       makeEntry({
         name,
@@ -183,6 +227,8 @@ function scanClaudeGlobal(): AgentConfigEntry[] {
         project_path: null,
         enabled: enabledPlugins[name] !== false,
         source_path: installedPluginsPath,
+        origin: "user",
+        has_hooks: pluginHasHooks(typeof installPath === "string" ? installPath : undefined),
         raw_config: { installations: raw, enabled_in_settings: enabledPlugins[name] ?? null }
       })
     );
@@ -215,6 +261,7 @@ function scanClaudeProject(projectPath: string): AgentConfigEntry[] {
           project_path: projectPath,
           enabled: true,
           source_path: sharedMcpPath,
+          origin: "user",
           raw_config: raw
         })
       );
@@ -235,6 +282,7 @@ function scanClaudeProject(projectPath: string): AgentConfigEntry[] {
           project_path: projectPath,
           enabled: value !== false,
           source_path: settingsPath,
+          origin: "user",
           raw_config: { enabled: value }
         })
       );
@@ -258,6 +306,7 @@ function scanCursorMcp(mcpJsonPath: string, scope: AgentConfigScope, projectPath
       // Cursor's own mcp.json convention supports a per-server "disabled" flag.
       enabled: raw.disabled !== true,
       source_path: mcpJsonPath,
+      origin: "user",
       raw_config: raw
     })
   );
@@ -297,6 +346,7 @@ function scanCodexConfig(configPath: string, scope: AgentConfigScope, projectPat
         project_path: projectPath,
         enabled: raw.enabled !== false,
         source_path: configPath,
+        origin: "user",
         raw_config: raw
       })
     );
@@ -313,6 +363,7 @@ function scanCodexConfig(configPath: string, scope: AgentConfigScope, projectPat
         project_path: projectPath,
         enabled: raw.enabled !== false,
         source_path: configPath,
+        origin: "user",
         raw_config: raw
       })
     );
@@ -340,6 +391,7 @@ export type AgentConfigFilter = {
   type?: string;
   scope?: string;
   project?: string;
+  origin?: string;
 };
 
 // Disabling a Claude mcp entry removes it from the live config and stashes its raw config
@@ -352,8 +404,33 @@ function scanClaudeMcpStash(): AgentConfigEntry[] {
     ...decodeAgentConfigId(id),
     id,
     enabled: false,
+    origin: "user" as const,
     raw_config
   }));
+}
+
+// Claude Code tracks its own invocation counts in ~/.claude.json - real signal for "is this
+// actually used", as opposed to just "installed". Only Claude has this; Cursor/Codex entries
+// are left without usage_count rather than faked as 0.
+function loadClaudeUsage(): {
+  skillUsage: Record<string, { usageCount?: number; lastUsedAt?: number }>;
+  pluginUsage: Record<string, { usageCount?: number; lastUsedAt?: number }>;
+} {
+  const json = safeReadJson(claudeJsonPath());
+  return {
+    skillUsage: (json?.skillUsage ?? {}) as Record<string, { usageCount?: number; lastUsedAt?: number }>,
+    pluginUsage: (json?.pluginUsage ?? {}) as Record<string, { usageCount?: number; lastUsedAt?: number }>
+  };
+}
+
+function withUsage(entries: AgentConfigEntry[]): AgentConfigEntry[] {
+  const { skillUsage, pluginUsage } = loadClaudeUsage();
+  return entries.map((entry) => {
+    if (entry.tool !== "claude") return entry;
+    const usage = entry.type === "plugin" ? pluginUsage[entry.name] : entry.type === "skill" ? skillUsage[entry.name] : undefined;
+    if (!usage) return entry;
+    return { ...entry, usage_count: usage.usageCount, last_used_at: usage.lastUsedAt };
+  });
 }
 
 export function scanAgentConfig(projectRoots: string[], filter: AgentConfigFilter = {}): AgentConfigEntry[] {
@@ -369,10 +446,13 @@ export function scanAgentConfig(projectRoots: string[], filter: AgentConfigFilte
     entries.push(...scanClaudeProject(root), ...scanCursorProject(root), ...scanCodexProject(root));
   }
 
+  entries = withUsage(entries);
+
   if (filter.tool) entries = entries.filter((e) => e.tool === filter.tool);
   if (filter.type) entries = entries.filter((e) => e.type === filter.type);
   if (filter.scope) entries = entries.filter((e) => e.scope === filter.scope);
   if (filter.project) entries = entries.filter((e) => e.project_path === filter.project);
+  if (filter.origin) entries = entries.filter((e) => e.origin === filter.origin);
 
   return entries.sort((a, b) => a.name.localeCompare(b.name));
 }
@@ -385,7 +465,11 @@ export function findDuplicates(entries: AgentConfigEntry[]): DuplicateGroup[] {
     byName.set(entry.name, bucket);
   }
   return [...byName.entries()]
-    .filter(([, group]) => group.length > 1)
+    // Same name mirrored across tools (the common case) isn't a real collision - the
+    // dashboard already shows that as "N tools" on the group. Only flag it here when the
+    // name is genuinely reused across *different* entity types (e.g. a "playwright" skill
+    // and a "playwright" MCP server).
+    .filter(([, group]) => new Set(group.map((entry) => entry.type)).size > 1)
     .map(([name, group]) => ({ name, entries: group }))
     .sort((a, b) => a.name.localeCompare(b.name));
 }

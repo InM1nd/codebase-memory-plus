@@ -2193,7 +2193,7 @@ h4 {
 }
 
 .agent-config-search-wrap {
-  flex: 1 1 280px;
+  flex: 0 1 240px;
   min-width: 0;
   padding-left: 9px;
 }
@@ -2296,6 +2296,7 @@ h4 {
   display: flex;
   flex-direction: column;
   gap: 7px;
+  min-height: 64px;
   border: 1px solid var(--hairline);
   border-radius: 6px;
   background: var(--panel);
@@ -2341,23 +2342,61 @@ h4 {
 }
 
 .agent-config-card-location {
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  max-width: 200px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .agent-config-card-actions {
   display: inline-flex;
   flex-shrink: 0;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 7px;
 }
 
 .agent-config-type {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
   border-radius: 999px;
   font-size: 9px;
   font-weight: 700;
   letter-spacing: 0.03em;
   padding: 2px 6px;
   text-transform: uppercase;
+}
+
+.agent-config-tool-pill svg,
+.agent-config-type svg,
+.agent-config-delete svg {
+  width: 10px;
+  height: 10px;
+  fill: none;
+  flex: 0 0 auto;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+
+.agent-config-delete svg {
+  width: 13px;
+  height: 13px;
+}
+
+.agent-config-size-toggle .size-toggle-btn svg {
+  width: 11px;
+  height: 11px;
+  fill: none;
+  flex: 0 0 auto;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+  margin-right: 3px;
+  vertical-align: -1px;
 }
 
 .agent-config-type.type-mcp {
@@ -2408,6 +2447,17 @@ h4 {
   border: 1px dashed var(--hairline-strong);
   border-radius: 999px;
   color: var(--muted);
+  font-size: 9px;
+  font-weight: 650;
+  padding: 1px 5px;
+  text-transform: uppercase;
+}
+
+.agent-config-origin-badge {
+  border: 1px solid var(--hairline-strong);
+  border-radius: 999px;
+  color: var(--muted);
+  background: var(--panel-2);
   font-size: 9px;
   font-weight: 650;
   padding: 1px 5px;
@@ -2642,6 +2692,32 @@ h4 {
   font-size: 10px;
 }
 
+.agent-config-detail-usage {
+  color: var(--accent);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.agent-config-usage-badge {
+  border: 1px solid var(--hairline-strong);
+  border-radius: 999px;
+  color: var(--accent);
+  font-size: 9px;
+  font-weight: 650;
+  padding: 1px 6px;
+  font-variant-numeric: tabular-nums;
+}
+
+.agent-config-hooks-badge {
+  border: 1px solid var(--risk-low);
+  border-radius: 999px;
+  color: var(--risk-low);
+  font-size: 9px;
+  font-weight: 650;
+  padding: 1px 6px;
+  text-transform: uppercase;
+}
+
 @media (max-width: 760px) {
   .agent-config-card-top {
     align-items: start;
@@ -2654,16 +2730,46 @@ h4 {
 
 .agent-config-table {
   width: 100%;
+  table-layout: fixed;
   border-collapse: collapse;
   font-size: 12px;
+}
+
+.agent-config-col-name {
+  width: 22%;
+}
+
+.agent-config-col-type {
+  width: 9%;
+}
+
+.agent-config-col-status {
+  width: 10%;
+}
+
+.agent-config-col-uses {
+  width: 8%;
+}
+
+.agent-config-col-tools {
+  width: 16%;
+}
+
+.agent-config-col-scope {
+  width: 17%;
+}
+
+.agent-config-col-actions {
+  width: 18%;
 }
 
 .agent-config-table th,
 .agent-config-table td {
   border-bottom: 1px solid var(--hairline);
-  padding: 7px 10px;
+  padding: 8px 10px;
   text-align: left;
-  vertical-align: middle;
+  vertical-align: top;
+  height: 40px;
 }
 
 .agent-config-table th {
@@ -2671,34 +2777,53 @@ h4 {
   font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
+  height: auto;
 }
 
 .agent-config-table-row:hover {
   background: var(--panel-2);
 }
 
-.agent-config-table-name {
+.agent-config-table-name-inner {
   display: flex;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 6px;
-  font-weight: 650;
-  overflow-wrap: anywhere;
+  min-width: 0;
 }
 
-.agent-config-table-tools {
+.agent-config-table-name-text {
+  overflow: hidden;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-config-table-uses {
+  color: var(--muted);
+}
+
+.agent-config-table-uses-empty {
+  color: var(--hairline-strong);
+}
+
+.agent-config-table-tools-inner {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 4px;
 }
 
 .agent-config-table-location {
+  overflow: hidden;
   color: var(--muted);
-  overflow-wrap: anywhere;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.agent-config-table-actions {
+.agent-config-table-actions-inner {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   justify-content: flex-end;
   gap: 8px;

@@ -21,6 +21,22 @@ const TYPE_LABELS: Record<AgentConfigType, string> = {
   plugin: "Plugin"
 };
 
+// Same stroke-icon style as the existing toolbar icons (search/sort/duplicates/refresh):
+// 24x24 viewBox, no inline fill/stroke - color and stroke-width come from CSS.
+const TOOL_ICONS: Record<AgentConfigTool, string> = {
+  claude: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4l1.8 5.2L19 11l-5.2 1.8L12 18l-1.8-5.2L5 11l5.2-1.8z" /></svg>`,
+  cursor: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3l14 8-6 2-2 6-6-16z" /></svg>`,
+  codex: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7.79 4.5v9L12 21l-7.79-4.5v-9z" /></svg>`
+};
+
+const TYPE_ICONS: Record<AgentConfigType, string> = {
+  mcp: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 2v4M15 2v4M6 8h12l-1 6a5 5 0 0 1-10 0z" /><path d="M12 18v4" /></svg>`,
+  skill: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h9l3 3v15H6z" /><path d="M15 3v3h3" /></svg>`,
+  plugin: `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2" /><path d="M12 8v8M8 12h8" /></svg>`
+};
+
+const TRASH_ICON = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13" /></svg>`;
+
 const STATUS_OPTIONS = [
   { value: "", label: "All status" },
   { value: "enabled", label: "Enabled" },
@@ -29,7 +45,7 @@ const STATUS_OPTIONS = [
 ] as const;
 
 type StatusFilter = (typeof STATUS_OPTIONS)[number]["value"];
-type SortMode = "name" | "type" | "status" | "tools";
+type SortMode = "name" | "type" | "status" | "tools" | "usage";
 type StatusTone = "neutral" | "success" | "error";
 type ViewMode = "cards" | "table";
 
@@ -42,6 +58,7 @@ type Filters = {
   search: string;
   duplicatesOnly: boolean;
   view: ViewMode;
+  includePluginSkills: boolean;
 };
 
 type PersistedFilters = Partial<Filters>;
@@ -63,14 +80,15 @@ const DEFAULT_FILTERS: Filters = {
   sort: "name",
   search: "",
   duplicatesOnly: false,
-  view: "cards"
+  view: "cards",
+  includePluginSkills: false
 };
 
 const TOOL_OPTIONS = [
   { value: "", label: "All tools" },
-  { value: "claude", label: "Claude" },
-  { value: "cursor", label: "Cursor" },
-  { value: "codex", label: "Codex" }
+  { value: "claude", label: "Claude", icon: TOOL_ICONS.claude },
+  { value: "cursor", label: "Cursor", icon: TOOL_ICONS.cursor },
+  { value: "codex", label: "Codex", icon: TOOL_ICONS.codex }
 ];
 
 const VIEW_OPTIONS: Array<{ value: ViewMode; label: string }> = [
@@ -92,6 +110,7 @@ const els = {
   statusFilter: q<HTMLSelectElement>("#agentConfigStatusFilter"),
   sortSelect: q<HTMLSelectElement>("#agentConfigSort"),
   duplicatesOnly: q<HTMLButtonElement>("#agentConfigDuplicatesOnly"),
+  includePluginSkills: q<HTMLButtonElement>("#agentConfigIncludePluginSkills"),
   viewMode: q<HTMLDivElement>("#agentConfigViewMode"),
   status: q<HTMLParagraphElement>("#agentConfigStatus"),
   stats: q<HTMLDivElement>("#agentConfigStats"),
@@ -173,13 +192,13 @@ function uniqueCountsByType(entries: AgentConfigEntry[]): Record<AgentConfigType
   return { mcp: namesByType.mcp.size, skill: namesByType.skill.size, plugin: namesByType.plugin.size };
 }
 
-function typeFilterOptions(): Array<{ value: string; label: string }> {
+function typeFilterOptions(): Array<{ value: string; label: string; icon?: string }> {
   const counts = uniqueCountsByType(state.entries);
   return [
     { value: "", label: "All types" },
-    { value: "mcp", label: `MCP (${formatNumber(counts.mcp)})` },
-    { value: "skill", label: `Skill (${formatNumber(counts.skill)})` },
-    { value: "plugin", label: `Plugin (${formatNumber(counts.plugin)})` }
+    { value: "mcp", label: `MCP (${formatNumber(counts.mcp)})`, icon: TYPE_ICONS.mcp },
+    { value: "skill", label: `Skill (${formatNumber(counts.skill)})`, icon: TYPE_ICONS.skill },
+    { value: "plugin", label: `Plugin (${formatNumber(counts.plugin)})`, icon: TYPE_ICONS.plugin }
   ];
 }
 
@@ -225,7 +244,11 @@ function renderSkeletonCards(count: number): string {
 }
 
 function toolPill(tool: AgentConfigTool): string {
-  return `<span class="agent-config-tool-pill tool-${escapeHtml(tool)}">${escapeHtml(tool)}</span>`;
+  return `<span class="agent-config-tool-pill tool-${escapeHtml(tool)}">${TOOL_ICONS[tool]}${escapeHtml(tool)}</span>`;
+}
+
+function typeBadgeHtml(type: AgentConfigType): string {
+  return `<span class="agent-config-type type-${escapeHtml(type)}">${TYPE_ICONS[type]}${escapeHtml(TYPE_LABELS[type])}</span>`;
 }
 
 function groupStatus(group: AgentConfigGroup): GroupStatus {
@@ -255,8 +278,13 @@ function hasActiveFilters(): boolean {
     Boolean(state.filters.status) ||
     Boolean(state.filters.search.trim()) ||
     state.filters.duplicatesOnly ||
-    state.filters.sort !== "name"
+    state.filters.sort !== "name" ||
+    state.filters.includePluginSkills
   );
+}
+
+function isPluginOriginGroup(group: AgentConfigGroup): boolean {
+  return group.type === "skill" && group.entries.every((entry) => entry.origin === "plugin");
 }
 
 function filteredAndSortedGroups(): { groups: AgentConfigGroup[]; total: number } {
@@ -269,6 +297,7 @@ function filteredAndSortedGroups(): { groups: AgentConfigGroup[]; total: number 
     if (state.filters.type && group.type !== state.filters.type) return false;
     if (state.filters.scope && !scopes.has(state.filters.scope as AgentConfigEntry["scope"])) return false;
     if (state.filters.duplicatesOnly && !state.duplicateNames.has(group.name)) return false;
+    if (!state.filters.includePluginSkills && isPluginOriginGroup(group)) return false;
     if (state.filters.status) {
       const status = groupStatus(group);
       if (status !== state.filters.status) return false;
@@ -287,6 +316,9 @@ function filteredAndSortedGroups(): { groups: AgentConfigGroup[]; total: number 
     if (state.filters.sort === "tools") {
       return b.entries.length - a.entries.length || a.name.localeCompare(b.name);
     }
+    if (state.filters.sort === "usage") {
+      return (groupUsage(b) ?? -1) - (groupUsage(a) ?? -1) || a.name.localeCompare(b.name);
+    }
     return a.name.localeCompare(b.name) || TYPE_LABELS[a.type].localeCompare(TYPE_LABELS[b.type]);
   });
 
@@ -300,6 +332,54 @@ function locationMeta(group: AgentConfigGroup): string {
   if (!projects.length) return scopesText;
   const projectText = projects.map((project) => prettyPath(project)).join(", ");
   return `${scopesText} · ${projectText}`;
+}
+
+// A short, single-line label for the card/table location cell - the full scope/project
+// breakdown (locationMeta above) always fits, but wraps onto multiple lines the moment a
+// project path is involved, which is what made row/card heights uneven. Full detail still
+// available via the title= tooltip.
+function locationSummary(group: AgentConfigGroup): { short: string; full: string } {
+  const full = locationMeta(group);
+  const scopes = uniqueSorted(group.entries.map((entry) => entry.scope));
+  const projects = uniqueSorted(group.entries.map((entry) => entry.project_path).filter((value): value is string => Boolean(value)));
+
+  if (!projects.length) return { short: "Global", full };
+
+  const hasGlobal = scopes.includes("global");
+  if (projects.length === 1) {
+    const segments = prettyPath(projects[0]).split(" / ");
+    const label = segments[segments.length - 1] || projects[0];
+    return { short: hasGlobal ? `Global + ${label}` : label, full };
+  }
+  return { short: hasGlobal ? `Global + ${projects.length}` : `${projects.length} projects`, full };
+}
+
+function toolCountChipHtml(group: AgentConfigGroup): string {
+  const count = uniqueSorted(group.entries.map((entry) => entry.tool)).length;
+  if (count <= 1) return "";
+  return `<span class="agent-config-group-count" title="${count} tools">${count}</span>`;
+}
+
+function groupUsage(group: AgentConfigGroup): number | undefined {
+  const counts = group.entries
+    .map((entry) => entry.usage_count)
+    .filter((count): count is number => typeof count === "number");
+  return counts.length ? Math.max(...counts) : undefined;
+}
+
+function hasHooksBadgeHtml(group: AgentConfigGroup): string {
+  if (group.type !== "plugin" || !group.entries.some((entry) => entry.has_hooks)) return "";
+  return `<span class="agent-config-hooks-badge" title="This plugin registers its own hooks (e.g. SessionStart) - it stays active every session regardless of the skill toggle below">hooked</span>`;
+}
+
+function usageBadgeHtml(group: AgentConfigGroup): string {
+  const usage = groupUsage(group);
+  if (usage === undefined) return "";
+  return `<span class="agent-config-usage-badge" title="Claude-tracked invocation count">${formatNumber(usage)}&times;</span>`;
+}
+
+function formatLastUsed(timestamp: number): string {
+  return new Date(timestamp).toLocaleDateString();
 }
 
 function configPreview(entry: AgentConfigEntry): string {
@@ -329,7 +409,7 @@ function variantActionsHtml(entry: AgentConfigEntry): string {
       aria-label="Delete ${escapeHtml(entry.name)} from ${escapeHtml(entry.tool)}"
       title="Delete"
     >
-      ×
+      ${TRASH_ICON}
     </button>
   `;
 }
@@ -353,6 +433,11 @@ function detailsRowsHtml(group: AgentConfigGroup): string {
         <code class="agent-config-detail-path" title="${escapeHtml(entry.source_path)}">${escapeHtml(entry.source_path)}</code>
         <button type="button" class="copy-btn" data-copy-source="${escapeHtml(entry.source_path)}">Copy</button>
         <span class="agent-config-detail-preview">${escapeHtml(configPreview(entry))}</span>
+        ${
+          typeof entry.usage_count === "number"
+            ? `<span class="agent-config-detail-usage">used ${formatNumber(entry.usage_count)}&times;${entry.last_used_at ? ` · last ${formatLastUsed(entry.last_used_at)}` : ""}</span>`
+            : ""
+        }
       </div>
     `
     )
@@ -369,16 +454,15 @@ function expandPanelHtml(group: AgentConfigGroup, index: number, wrapTag: "div" 
     <div class="agent-config-details-body">${detailsRowsHtml(group)}</div>
   `;
   if (wrapTag === "tr") {
-    return `<tr class="agent-config-details-row" data-details-panel="${index}" hidden><td colspan="6">${inner}</td></tr>`;
+    return `<tr class="agent-config-details-row" data-details-panel="${index}" hidden><td colspan="7">${inner}</td></tr>`;
   }
   return `<div class="agent-config-expand" data-details-panel="${index}" hidden>${inner}</div>`;
 }
 
-function detailsToggleHtml(index: number, isMulti: boolean, toolCount: number): string {
-  const label = isMulti ? `${toolCount} tools` : "Details";
+function detailsToggleHtml(index: number): string {
   return `
     <button type="button" class="agent-config-details-toggle" data-details-toggle="${index}" aria-expanded="false">
-      <span>${escapeHtml(label)}</span>
+      <span>Details</span>
       <span class="chevron" aria-hidden="true">▾</span>
     </button>
   `;
@@ -387,6 +471,7 @@ function detailsToggleHtml(index: number, isMulti: boolean, toolCount: number): 
 function cardHtml(group: AgentConfigGroup, index: number): string {
   const status = groupStatus(group);
   const isDuplicate = state.duplicateNames.has(group.name);
+  const isPlugin = isPluginOriginGroup(group);
   const isMulti = group.entries.length > 1;
   const singleEntry = isMulti ? null : group.entries[0];
   const canEnableAll = group.entries.some((entry) => !entry.enabled);
@@ -398,11 +483,15 @@ function cardHtml(group: AgentConfigGroup, index: number): string {
         <div class="agent-config-card-main">
           <h3 class="agent-config-card-name">${escapeHtml(group.name)}</h3>
           <div class="agent-config-card-meta">
-            <span class="agent-config-type type-${escapeHtml(group.type)}">${escapeHtml(TYPE_LABELS[group.type])}</span>
+            ${typeBadgeHtml(group.type)}
+            ${toolCountChipHtml(group)}
             <span class="badge badge-${status}">${statusLabel(status)}</span>
             ${isDuplicate ? `<span class="agent-config-duplicate">dup</span>` : ""}
-            <span class="agent-config-card-location">${escapeHtml(locationMeta(group))}</span>
-            ${detailsToggleHtml(index, isMulti, group.entries.length)}
+            ${isPlugin ? `<span class="agent-config-origin-badge">plugin</span>` : ""}
+            ${hasHooksBadgeHtml(group)}
+            ${usageBadgeHtml(group)}
+            <span class="agent-config-card-location" title="${escapeHtml(locationSummary(group).full)}">${escapeHtml(locationSummary(group).short)}</span>
+            ${detailsToggleHtml(index)}
           </div>
         </div>
         <div class="agent-config-card-actions">
@@ -426,35 +515,41 @@ function cardHtml(group: AgentConfigGroup, index: number): string {
 function tableRowHtml(group: AgentConfigGroup, index: number): string {
   const status = groupStatus(group);
   const isDuplicate = state.duplicateNames.has(group.name);
+  const isPlugin = isPluginOriginGroup(group);
   const isMulti = group.entries.length > 1;
   const singleEntry = isMulti ? null : group.entries[0];
   const canEnableAll = group.entries.some((entry) => !entry.enabled);
   const canDisableAll = group.entries.some((entry) => entry.enabled);
   const tools = uniqueSorted(group.entries.map((entry) => entry.tool));
 
+  const location = locationSummary(group);
+
   return `
     <tr class="agent-config-table-row" data-group-key="${escapeHtml(group.key)}">
-      <td class="agent-config-table-name">
-        ${escapeHtml(group.name)}
+      <td class="agent-config-table-name"><div class="agent-config-table-name-inner">
+        <span class="agent-config-table-name-text">${escapeHtml(group.name)}</span>
         ${isDuplicate ? `<span class="agent-config-duplicate">dup</span>` : ""}
-      </td>
-      <td><span class="agent-config-type type-${escapeHtml(group.type)}">${escapeHtml(TYPE_LABELS[group.type])}</span></td>
+        ${isPlugin ? `<span class="agent-config-origin-badge">plugin</span>` : ""}
+        ${hasHooksBadgeHtml(group)}
+      </div></td>
+      <td>${typeBadgeHtml(group.type)}</td>
       <td><span class="badge badge-${status}">${statusLabel(status)}</span></td>
-      <td class="agent-config-table-tools">${tools.map((tool) => toolPill(tool)).join("")}</td>
-      <td class="agent-config-table-location">${escapeHtml(locationMeta(group))}</td>
-      <td class="agent-config-table-actions">
+      <td class="agent-config-table-uses">${usageBadgeHtml(group) || `<span class="agent-config-table-uses-empty">—</span>`}</td>
+      <td class="agent-config-table-tools"><div class="agent-config-table-tools-inner">${toolCountChipHtml(group)}${tools.map((tool) => toolPill(tool)).join("")}</div></td>
+      <td class="agent-config-table-location" title="${escapeHtml(location.full)}">${escapeHtml(location.short)}</td>
+      <td class="agent-config-table-actions"><div class="agent-config-table-actions-inner">
         ${
           isMulti
             ? `<div class="agent-config-bulk-actions">
-                 <button type="button" class="row-action" data-bulk-enabled="true" data-group-key="${escapeHtml(group.key)}" ${!canEnableAll ? "disabled" : ""}>All on</button>
-                 <button type="button" class="row-action" data-bulk-enabled="false" data-group-key="${escapeHtml(group.key)}" ${!canDisableAll ? "disabled" : ""}>All off</button>
+                 <button type="button" class="row-action" data-bulk-enabled="true" data-group-key="${escapeHtml(group.key)}" title="Enable all tools" ${!canEnableAll ? "disabled" : ""}>On</button>
+                 <button type="button" class="row-action" data-bulk-enabled="false" data-group-key="${escapeHtml(group.key)}" title="Disable all tools" ${!canDisableAll ? "disabled" : ""}>Off</button>
                </div>`
             : singleEntry
               ? variantActionsHtml(singleEntry)
               : ""
         }
-        ${detailsToggleHtml(index, isMulti, group.entries.length)}
-      </td>
+        ${detailsToggleHtml(index)}
+      </div></td>
     </tr>
     ${expandPanelHtml(group, index, "tr")}
   `;
@@ -463,11 +558,21 @@ function tableRowHtml(group: AgentConfigGroup, index: number): string {
 function tableHtml(groups: AgentConfigGroup[]): string {
   return `
     <table class="agent-config-table">
+      <colgroup>
+        <col class="agent-config-col-name" />
+        <col class="agent-config-col-type" />
+        <col class="agent-config-col-status" />
+        <col class="agent-config-col-uses" />
+        <col class="agent-config-col-tools" />
+        <col class="agent-config-col-scope" />
+        <col class="agent-config-col-actions" />
+      </colgroup>
       <thead>
         <tr>
           <th>Name</th>
           <th>Type</th>
           <th>Status</th>
+          <th>Uses</th>
           <th>Tools</th>
           <th>Scope</th>
           <th>Actions</th>
@@ -506,14 +611,14 @@ function renderStats(): void {
 
 function renderFilterGroup(
   container: HTMLDivElement,
-  options: Array<{ value: string; label: string }>,
+  options: Array<{ value: string; label: string; icon?: string }>,
   activeValue: string,
   onSelect: (value: string) => void
 ): void {
   container.innerHTML = options
     .map(
       (option) =>
-        `<button type="button" class="size-toggle-btn ${option.value === activeValue ? "is-active" : ""}" data-value="${escapeHtml(option.value)}">${escapeHtml(option.label)}</button>`
+        `<button type="button" class="size-toggle-btn ${option.value === activeValue ? "is-active" : ""}" data-value="${escapeHtml(option.value)}">${option.icon ?? ""}${escapeHtml(option.label)}</button>`
     )
     .join("");
   container.querySelectorAll<HTMLButtonElement>("button").forEach((button) => {
@@ -538,6 +643,8 @@ function renderFilters(): void {
   els.statusFilter.value = state.filters.status;
   els.duplicatesOnly.classList.toggle("is-off", !state.filters.duplicatesOnly);
   els.duplicatesOnly.classList.toggle("is-active", state.filters.duplicatesOnly);
+  els.includePluginSkills.classList.toggle("is-off", !state.filters.includePluginSkills);
+  els.includePluginSkills.classList.toggle("is-active", state.filters.includePluginSkills);
   els.sortSelect.value = state.filters.sort;
   renderFilterGroup(els.viewMode, VIEW_OPTIONS, state.filters.view, (value) => {
     state.filters.view = value as ViewMode;
@@ -672,7 +779,10 @@ async function deleteEntry(id: string): Promise<void> {
   const entry = state.entries.find((item) => item.id === id);
   if (!entry) return;
 
-  const confirmed = window.confirm(`Delete "${entry.name}" from ${entry.tool}? A backup will be created first.`);
+  const location = entry.project_path ? `${entry.scope} · ${prettyPath(entry.project_path)}` : entry.scope;
+  const confirmed = window.confirm(
+    `Delete "${entry.name}" (${entry.type}, ${entry.tool}, ${location})?\n\nSource: ${entry.source_path}\n\nA backup will be created first, but this removes it from ${entry.tool} until restored.`
+  );
   if (!confirmed) return;
 
   const removed = removeEntry(id);
@@ -774,6 +884,12 @@ function bindAgentConfigEvents(): void {
   });
   els.duplicatesOnly.addEventListener("click", () => {
     state.filters.duplicatesOnly = !state.filters.duplicatesOnly;
+    persistFilters();
+    renderFilters();
+    renderCards();
+  });
+  els.includePluginSkills.addEventListener("click", () => {
+    state.filters.includePluginSkills = !state.filters.includePluginSkills;
     persistFilters();
     renderFilters();
     renderCards();

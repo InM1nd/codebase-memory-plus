@@ -381,7 +381,7 @@
                 id="agentConfigSearch"
                 class="input agent-config-search"
                 type="search"
-                placeholder="Search configurations"
+                placeholder="Search…"
                 aria-label="Search agent config"
                 autocomplete="off"
               />
@@ -393,6 +393,7 @@
                 <option value="type">Type</option>
                 <option value="status">Status</option>
                 <option value="tools">Tool count</option>
+                <option value="usage">Most used</option>
               </select>
             </label>
             <p id="agentConfigResultCount" class="agent-config-result-count" hidden></p>
@@ -407,27 +408,41 @@
                 <strong id="agentConfigPluginCountValue">0</strong><span>Plugins</span>
               </button>
             </div>
+            <div id="agentConfigViewMode" class="size-toggle agent-config-size-toggle agent-config-view-toggle" role="group" aria-label="Cards or table view"></div>
           </div>
 
           <div class="agent-config-toolbar-row agent-config-toolbar-filters">
-            <div id="agentConfigToolFilter" class="size-toggle agent-config-size-toggle" role="group" aria-label="Filter by tool"></div>
-            <div id="agentConfigTypeFilter" class="size-toggle agent-config-size-toggle" role="group" aria-label="Filter by type"></div>
-            <select id="agentConfigScopeFilter" class="select agent-config-filter-select" aria-label="Filter by scope">
-              <option value="">All scopes</option>
-              <option value="global">Global</option>
-              <option value="project">Project</option>
-            </select>
-            <select id="agentConfigStatusFilter" class="select agent-config-filter-select" aria-label="Filter by status">
-              <option value="">All status</option>
-              <option value="enabled">Enabled</option>
-              <option value="disabled">Disabled</option>
-              <option value="mixed">Mixed</option>
-            </select>
-            <button type="button" id="agentConfigDuplicatesOnly" class="filter-chip agent-config-duplicates">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="10" height="10" rx="1" /><path d="M6 16H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1" /></svg>
-              <span>Duplicates</span>
-            </button>
-            <div id="agentConfigViewMode" class="size-toggle agent-config-size-toggle agent-config-view-toggle" role="group" aria-label="Cards or table view"></div>
+            <div class="toolbar-group">
+              <div id="agentConfigToolFilter" class="size-toggle agent-config-size-toggle" role="group" aria-label="Filter by tool"></div>
+            </div>
+            <span class="toolbar-divider" aria-hidden="true"></span>
+            <div class="toolbar-group">
+              <div id="agentConfigTypeFilter" class="size-toggle agent-config-size-toggle" role="group" aria-label="Filter by type"></div>
+            </div>
+            <span class="toolbar-divider" aria-hidden="true"></span>
+            <div class="toolbar-group">
+              <select id="agentConfigScopeFilter" class="select agent-config-filter-select" aria-label="Filter by scope">
+                <option value="">All scopes</option>
+                <option value="global">Global</option>
+                <option value="project">Project</option>
+              </select>
+              <select id="agentConfigStatusFilter" class="select agent-config-filter-select" aria-label="Filter by status">
+                <option value="">All status</option>
+                <option value="enabled">Enabled</option>
+                <option value="disabled">Disabled</option>
+                <option value="mixed">Mixed</option>
+              </select>
+            </div>
+            <span class="toolbar-divider" aria-hidden="true"></span>
+            <div class="toolbar-group">
+              <button type="button" id="agentConfigDuplicatesOnly" class="filter-chip agent-config-duplicates">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="10" height="10" rx="1" /><path d="M6 16H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1" /></svg>
+                <span>Duplicates</span>
+              </button>
+              <button type="button" id="agentConfigIncludePluginSkills" class="filter-chip">
+                <span>Include plugin skills</span>
+              </button>
+            </div>
           </div>
         </div>
 
