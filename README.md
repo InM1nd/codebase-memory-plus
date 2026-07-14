@@ -9,7 +9,8 @@ This repo gives you two independent things, both built on the same local graph c
 - **An MCP server** (`codebase-memory-plus`) - one tool, `project_summary_visual`, for use from
   any MCP-compatible AI agent (Claude Code, Cursor, Codex, etc.).
 - **A local web dashboard** - project picker, package/symbol dependency graphs, relation
-  filters, architecture/perf/duplicate insights, and a toggle to embed
+  filters, architecture/perf/duplicate insights, an Agent Config view for managing MCP
+  servers/skills/plugins across Claude Code, Cursor, and Codex, and a toggle to embed
   `codebase-memory-mcp`'s own built-in graph UI alongside it.
 
 ## Prerequisites
@@ -63,6 +64,30 @@ environment variables:
 ```bash
 PORT=9000 CODEBASE_MEMORY_MCP_CACHE_DIR=/path/to/cache npm run dashboard
 ```
+
+### Agent Config
+
+Open via the header's **···** menu → **Agent Config**. It scans MCP servers, skills, and
+plugins across Claude Code, Cursor, and Codex (both global and per-project configs) and shows
+them as one list, grouped by name so the same skill mirrored across tools appears once with a
+per-tool breakdown.
+
+- **Toggle / delete** any entry - uses each tool's native CLI where one exists (e.g.
+  `claude plugin enable/disable`), otherwise edits the underlying config file directly
+  (Codex's `config.toml`, Cursor's `mcp.json`, or a stash file for Claude's `mcpServers`,
+  since it has no native disable flag). Delete always backs up the source file/directory to
+  `~/.codebase-memory-plus/backups/<timestamp>/` first.
+- **User vs plugin origin** - skills whose real files live inside a plugin's own cache
+  (resolved through symlinks) are tagged `plugin`; the "Include plugin skills" toggle keeps
+  them out of the default view so it isn't swamped by every sub-skill of every installed
+  plugin. See [`docs/agent-config-sync.md`](./docs/agent-config-sync.md) for the sync policy
+  this was built to enforce.
+- **Duplicates** - flags names genuinely reused across *different* entity types (e.g. a
+  `playwright` skill and a `playwright` MCP server), not just the same skill synced to
+  multiple tools.
+- **Usage** - when available, shows Claude Code's own tracked invocation counts
+  (`skillUsage`/`pluginUsage` in `~/.claude.json`), plus a `hooked` badge on plugins that
+  register their own session hooks (so they stay active regardless of the skill toggle).
 
 ## Use the MCP server
 

@@ -2326,19 +2326,67 @@ h4 {
 .agent-config-card-name {
   margin: 0;
   min-width: 0;
+  overflow: hidden;
   font-size: 14px;
   font-weight: 650;
   line-height: 1.2;
-  overflow-wrap: anywhere;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .agent-config-card-meta {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
+  align-content: flex-start;
   gap: 6px;
+  min-height: 44px;
   color: var(--muted);
   font-size: 11px;
+}
+
+.agent-config-tool-icons {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 3px;
+}
+
+.agent-config-tool-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  background: var(--panel-2);
+  color: var(--ink);
+}
+
+.agent-config-tool-icon svg {
+  width: 10px;
+  height: 10px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+
+.agent-config-tool-icon.tool-claude {
+  border-color: color-mix(in srgb, #d4a574 40%, var(--hairline));
+  background: color-mix(in srgb, #d4a574 12%, var(--panel-2));
+}
+
+.agent-config-tool-icon.tool-cursor {
+  border-color: color-mix(in srgb, #6ea8ff 40%, var(--hairline));
+  background: color-mix(in srgb, #6ea8ff 12%, var(--panel-2));
+}
+
+.agent-config-tool-icon.tool-codex {
+  border-color: color-mix(in srgb, #9b8cff 40%, var(--hairline));
+  background: color-mix(in srgb, #9b8cff 12%, var(--panel-2));
 }
 
 .agent-config-card-location {
@@ -2427,20 +2475,6 @@ h4 {
 .badge.badge-mixed {
   border: 1px solid var(--hairline-strong);
   color: var(--muted);
-}
-
-.agent-config-group-count {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 14px;
-  height: 14px;
-  padding: 0 4px;
-  border-radius: 999px;
-  background: var(--panel-2);
-  color: var(--muted);
-  font-size: 9px;
-  font-variant-numeric: tabular-nums;
 }
 
 .agent-config-duplicate {

@@ -354,10 +354,14 @@ function locationSummary(group: AgentConfigGroup): { short: string; full: string
   return { short: hasGlobal ? `Global + ${projects.length}` : `${projects.length} projects`, full };
 }
 
-function toolCountChipHtml(group: AgentConfigGroup): string {
-  const count = uniqueSorted(group.entries.map((entry) => entry.tool)).length;
-  if (count <= 1) return "";
-  return `<span class="agent-config-group-count" title="${count} tools">${count}</span>`;
+// Icon-only tool marks for the card meta row - just enough to see at a glance which tools a
+// skill/plugin is mirrored to without expanding Details. Table view shows full icon+text
+// pills instead (there's a dedicated Tools column with room for it).
+function toolIconsHtml(group: AgentConfigGroup): string {
+  const tools = uniqueSorted(group.entries.map((entry) => entry.tool));
+  return `<span class="agent-config-tool-icons">${tools
+    .map((tool) => `<span class="agent-config-tool-icon tool-${escapeHtml(tool)}" title="${escapeHtml(tool)}">${TOOL_ICONS[tool]}</span>`)
+    .join("")}</span>`;
 }
 
 function groupUsage(group: AgentConfigGroup): number | undefined {
@@ -481,11 +485,11 @@ function cardHtml(group: AgentConfigGroup, index: number): string {
     <article class="agent-config-card ${isMulti ? "is-multi" : "is-single"}" data-group-key="${escapeHtml(group.key)}">
       <div class="agent-config-card-top">
         <div class="agent-config-card-main">
-          <h3 class="agent-config-card-name">${escapeHtml(group.name)}</h3>
+          <h3 class="agent-config-card-name" title="${escapeHtml(group.name)}">${escapeHtml(group.name)}</h3>
           <div class="agent-config-card-meta">
             ${typeBadgeHtml(group.type)}
-            ${toolCountChipHtml(group)}
             <span class="badge badge-${status}">${statusLabel(status)}</span>
+            ${toolIconsHtml(group)}
             ${isDuplicate ? `<span class="agent-config-duplicate">dup</span>` : ""}
             ${isPlugin ? `<span class="agent-config-origin-badge">plugin</span>` : ""}
             ${hasHooksBadgeHtml(group)}
@@ -535,7 +539,7 @@ function tableRowHtml(group: AgentConfigGroup, index: number): string {
       <td>${typeBadgeHtml(group.type)}</td>
       <td><span class="badge badge-${status}">${statusLabel(status)}</span></td>
       <td class="agent-config-table-uses">${usageBadgeHtml(group) || `<span class="agent-config-table-uses-empty">—</span>`}</td>
-      <td class="agent-config-table-tools"><div class="agent-config-table-tools-inner">${toolCountChipHtml(group)}${tools.map((tool) => toolPill(tool)).join("")}</div></td>
+      <td class="agent-config-table-tools"><div class="agent-config-table-tools-inner">${tools.map((tool) => toolPill(tool)).join("")}</div></td>
       <td class="agent-config-table-location" title="${escapeHtml(location.full)}">${escapeHtml(location.short)}</td>
       <td class="agent-config-table-actions"><div class="agent-config-table-actions-inner">
         ${
