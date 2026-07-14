@@ -84,7 +84,12 @@ function listDirs(root: string): Array<{ name: string; path: string }> {
   if (!existsSync(root)) return [];
   try {
     return readdirSync(root, { withFileTypes: true })
-      .filter((item) => item.isDirectory())
+      .filter((item) => {
+        if (item.isDirectory()) return true;
+        // Skills are often symlinked from a canonical ~/.claude/skills copy.
+        if (item.isSymbolicLink()) return statSync(join(root, item.name)).isDirectory();
+        return false;
+      })
       .map((item) => ({ name: item.name, path: join(root, item.name) }));
   } catch {
     return [];

@@ -361,49 +361,77 @@
       </section>
 
       <section id="agentConfigView" class="agent-config-view" hidden>
-        <div class="home-head">
+        <div class="home-head agent-config-head">
           <div>
-            <p class="eyebrow">Agent Config</p>
-            <h2>MCP servers, skills &amp; plugins</h2>
+            <h2>Agent config</h2>
           </div>
           <div class="home-head-actions">
-            <button type="button" id="agentConfigRefresh" class="icon-button">Refresh</button>
+            <button type="button" id="agentConfigRefresh" class="icon-button agent-config-refresh">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v6h-6" /></svg>
+              <span>Refresh</span>
+            </button>
           </div>
         </div>
 
-        <div class="agent-config-filters">
-          <div class="agent-config-filter-group">
-            <span class="graph-filter-row-label">Tool</span>
-            <div id="agentConfigToolFilter" class="size-toggle" role="group" aria-label="Filter by tool"></div>
+        <div class="agent-config-toolbar">
+          <div class="agent-config-toolbar-row">
+            <label class="agent-config-search-wrap">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5" /><path d="m16 16 4 4" /></svg>
+              <input
+                id="agentConfigSearch"
+                class="input agent-config-search"
+                type="search"
+                placeholder="Search configurations"
+                aria-label="Search agent config"
+                autocomplete="off"
+              />
+            </label>
+            <label class="agent-config-sort-wrap">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M7 12h10M10 17h4" /></svg>
+              <select id="agentConfigSort" class="select agent-config-sort" aria-label="Sort agent config">
+                <option value="name">Name A-Z</option>
+                <option value="type">Type</option>
+                <option value="status">Status</option>
+                <option value="tools">Tool count</option>
+              </select>
+            </label>
+            <p id="agentConfigResultCount" class="agent-config-result-count" hidden></p>
+            <div id="agentConfigStats" class="agent-config-stats" aria-label="Unique agent config counts" hidden>
+              <button type="button" id="agentConfigMcpCount" class="agent-config-stat-chip" title="Filter by MCP servers">
+                <strong id="agentConfigMcpCountValue">0</strong><span>MCP</span>
+              </button>
+              <button type="button" id="agentConfigSkillCount" class="agent-config-stat-chip" title="Filter by skills">
+                <strong id="agentConfigSkillCountValue">0</strong><span>Skills</span>
+              </button>
+              <button type="button" id="agentConfigPluginCount" class="agent-config-stat-chip" title="Filter by plugins">
+                <strong id="agentConfigPluginCountValue">0</strong><span>Plugins</span>
+              </button>
+            </div>
           </div>
-          <div class="agent-config-filter-group">
-            <span class="graph-filter-row-label">Type</span>
-            <div id="agentConfigTypeFilter" class="size-toggle" role="group" aria-label="Filter by type"></div>
+
+          <div class="agent-config-toolbar-row agent-config-toolbar-filters">
+            <div id="agentConfigToolFilter" class="size-toggle agent-config-size-toggle" role="group" aria-label="Filter by tool"></div>
+            <div id="agentConfigTypeFilter" class="size-toggle agent-config-size-toggle" role="group" aria-label="Filter by type"></div>
+            <select id="agentConfigScopeFilter" class="select agent-config-filter-select" aria-label="Filter by scope">
+              <option value="">All scopes</option>
+              <option value="global">Global</option>
+              <option value="project">Project</option>
+            </select>
+            <select id="agentConfigStatusFilter" class="select agent-config-filter-select" aria-label="Filter by status">
+              <option value="">All status</option>
+              <option value="enabled">Enabled</option>
+              <option value="disabled">Disabled</option>
+              <option value="mixed">Mixed</option>
+            </select>
+            <button type="button" id="agentConfigDuplicatesOnly" class="filter-chip agent-config-duplicates">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="10" height="10" rx="1" /><path d="M6 16H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1" /></svg>
+              <span>Duplicates</span>
+            </button>
           </div>
-          <div class="agent-config-filter-group">
-            <span class="graph-filter-row-label">Scope</span>
-            <div id="agentConfigScopeFilter" class="size-toggle" role="group" aria-label="Filter by scope"></div>
-          </div>
-          <button type="button" id="agentConfigDuplicatesOnly" class="filter-chip">Duplicates only</button>
         </div>
 
         <p id="agentConfigStatus" class="empty">Loading agent config…</p>
-        <div id="agentConfigTableWrap" class="agent-config-table-wrap" hidden>
-          <table>
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Type</th>
-                <th>Tool</th>
-                <th>Scope</th>
-                <th>Project</th>
-                <th>Enabled</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody id="agentConfigTableBody"></tbody>
-          </table>
-        </div>
+        <div id="agentConfigCards" class="agent-config-cards" aria-live="polite"></div>
       </section>
     </div>
 
