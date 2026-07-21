@@ -912,7 +912,7 @@ function bindAgentConfigEvents(): void {
     els.search.select();
   });
 
-  document.querySelectorAll<HTMLButtonElement>("#homeButton, #allProjectsButton, #uiModePlus, #uiModeOriginal").forEach((button) => {
+  document.querySelectorAll<HTMLButtonElement>("#homeButton, #uiModePlus, #uiModeOriginal, #serenaButton").forEach((button) => {
     button.addEventListener("click", () => {
       els.view.hidden = true;
     });
@@ -928,6 +928,7 @@ export function showAgentConfig(): void {
   els.homeView.hidden = true;
   els.workspaceView.hidden = true;
   els.originalUiView.hidden = true;
+  q<HTMLElement>("#serenaView").hidden = true;
   els.view.hidden = false;
   if (!state.loaded && !state.loading) void loadAgentConfig();
 }

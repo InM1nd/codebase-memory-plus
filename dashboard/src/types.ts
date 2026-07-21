@@ -257,3 +257,38 @@ export type AgentConfigMutationResult = {
   backupPath?: string;
   error?: string;
 };
+
+export type SerenaStatusState = "not-configured" | "not-found" | "connected-other-project" | "connected";
+
+export type SerenaStatus = {
+  state: SerenaStatusState;
+  port?: number;
+  activeProject?: { name: string | null; path: string | null } | null;
+  registeredProjects?: Array<{ name: string; path: string; is_active: boolean }>;
+};
+
+export type SerenaOverview = {
+  active_project?: { name: string | null; language: string | null; path: string | null };
+  context?: { name: string; description: string };
+  modes?: Array<{ name: string; description: string }>;
+  active_tools?: string[];
+  registered_projects?: Array<{ name: string; path: string; is_active: boolean }>;
+  languages?: string[];
+  encoding?: string | null;
+  serena_version?: string;
+  [key: string]: unknown;
+};
+
+export type SerenaToolStats = {
+  stats: Record<string, { num_times_called: number; input_tokens: number; output_tokens: number }>;
+};
+
+export type SerenaLogsResponse = {
+  messages: string[];
+  max_idx: number;
+};
+
+export type SerenaMemory = {
+  content: string;
+  memory_name: string;
+};

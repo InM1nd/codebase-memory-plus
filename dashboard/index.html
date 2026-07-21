@@ -14,7 +14,6 @@
           <span class="brand-mark">CM+</span>
           <div class="brand-text">
             <h1>Codebase Memory Plus</h1>
-            <span class="brand-sub">Local graph workspace</span>
           </div>
         </button>
         <div class="header-search" id="headerSearch" hidden>
@@ -42,17 +41,21 @@
             <button type="button" id="uiModePlus" class="size-toggle-btn is-active" data-ui-mode="plus">Plus</button>
             <button type="button" id="uiModeOriginal" class="size-toggle-btn" data-ui-mode="original" title="Switch to the built-in codebase-memory-mcp graph UI">Original</button>
           </div>
+          <button type="button" id="agentConfigButton" class="icon-button" title="MCP servers, skills, and plugins registered across Claude, Cursor, and Codex" aria-label="MCP &amp; Skills audit">MCP &amp; Skills</button>
+          <button type="button" id="serenaButton" class="icon-button" title="Serena MCP status, memories, and tool usage for this project" aria-label="Serena" hidden>Serena</button>
+          <button type="button" id="settingsButton" class="icon-button" title="Settings" aria-label="Settings">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" /></svg>
+          </button>
           <button class="icon-button" id="shortcutsButton" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">?</button>
-          <div class="more-menu" id="moreMenu">
-            <button type="button" id="moreMenuButton" class="icon-button" aria-haspopup="true" aria-expanded="false" aria-controls="moreMenuPanel" title="More" aria-label="More actions">&hellip;</button>
+          <div class="more-menu" id="moreMenu" hidden>
+            <button type="button" id="moreMenuButton" class="icon-button" aria-haspopup="true" aria-expanded="false" aria-controls="moreMenuPanel" title="Project tools (ADR, Query)" aria-label="Project tools">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5" r="1.4" /><circle cx="12" cy="12" r="1.4" /><circle cx="12" cy="19" r="1.4" /></svg>
+            </button>
             <div id="moreMenuPanel" class="more-menu-panel" role="menu" hidden>
               <button type="button" id="adrButton" class="more-menu-item" role="menuitem" title="Architecture Decision Record" aria-label="Architecture Decision Record" hidden>ADR</button>
               <button type="button" id="queryButton" class="more-menu-item" role="menuitem" title="Cypher query console" aria-label="Cypher query console" hidden>Query</button>
-              <button type="button" id="settingsButton" class="more-menu-item" role="menuitem" title="Settings" aria-label="Settings">Settings</button>
-              <button type="button" id="agentConfigButton" class="more-menu-item" role="menuitem" title="Agent Config" aria-label="Agent Config">Agent Config</button>
             </div>
           </div>
-          <button type="button" id="allProjectsButton" class="icon-button">All projects</button>
         </div>
       </header>
 
@@ -182,6 +185,7 @@
               <div>
                 <p class="eyebrow">Graph overview</p>
                 <h2 id="projectTitle">Select a project</h2>
+                <span id="projectSerenaBadge" class="serena-badge" hidden></span>
                 <nav id="breadcrumb" class="breadcrumb" aria-label="Breadcrumb" hidden>
                   <span id="breadcrumbProject" class="breadcrumb-item"></span>
                   <span class="breadcrumb-sep">/</span>
@@ -448,6 +452,52 @@
 
         <p id="agentConfigStatus" class="empty">Loading agent config…</p>
         <div id="agentConfigCards" class="agent-config-cards" aria-live="polite"></div>
+      </section>
+
+      <section id="serenaView" class="serena-view" hidden>
+        <div class="home-head agent-config-head">
+          <div>
+            <h2>Serena</h2>
+          </div>
+          <div class="home-head-actions">
+            <button type="button" id="serenaRefresh" class="icon-button agent-config-refresh">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v6h-6" /></svg>
+              <span>Refresh</span>
+            </button>
+          </div>
+        </div>
+
+        <div id="serenaStatus" class="serena-status"></div>
+        <div id="serenaOverview" class="serena-overview" hidden></div>
+
+        <div class="serena-section">
+          <div class="serena-section-head">
+            <h3>Tool usage</h3>
+            <div id="serenaViewMode" class="size-toggle agent-config-size-toggle" role="group" aria-label="Cards or table view"></div>
+          </div>
+          <div id="serenaToolStats" class="serena-tool-stats"></div>
+        </div>
+
+        <div class="serena-section">
+          <div class="serena-section-head">
+            <h3>Memories</h3>
+            <button type="button" id="serenaMemoryNew" class="filter-chip">New memory</button>
+          </div>
+          <div id="serenaMemories" class="serena-memories"></div>
+          <div id="serenaMemoryEditor" class="serena-memory-editor" hidden>
+            <input id="serenaMemoryEditorName" class="input" type="text" placeholder="Memory name" />
+            <textarea id="serenaMemoryEditorContent" class="serena-memory-editor-content" placeholder="Memory content (markdown)"></textarea>
+            <div class="serena-memory-editor-actions">
+              <button type="button" id="serenaMemoryEditorCancel" class="icon-button">Cancel</button>
+              <button type="button" id="serenaMemoryEditorSave" class="icon-button is-active">Save</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="serena-section">
+          <h3>Log tail</h3>
+          <pre id="serenaLogs" class="serena-logs"></pre>
+        </div>
       </section>
     </div>
 

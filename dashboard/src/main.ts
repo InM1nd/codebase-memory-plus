@@ -1,5 +1,6 @@
 import { ApiError, deleteJson, getJson, postJson, putJson } from "./api.js";
 import { showAgentConfig } from "./agent-config.js";
+import { showSerena } from "./serena.js";
 import { PackageGraph, type SimEdge, type SimNode } from "./graph.js";
 import { defaultSettings, loadPrefs, savePrefs, type Settings } from "./storage.js";
 import { debounce, edgeKey, escapeHtml, formatNumber, packageFromFile, prettyName, prettyPath } from "./utils.js";
@@ -51,6 +52,7 @@ type DashboardState = {
   duplicates: DuplicatePair[] | null;
   impact: ImpactResult | null;
   crossRepoProjects: CachedProject[] | null;
+  serenaConnected: Set<string>;
   trace: {
     symbol: string | null;
     label: string | null;
@@ -82,8 +84,39 @@ const state: DashboardState = {
   duplicates: null,
   impact: null,
   crossRepoProjects: null,
+  serenaConnected: new Set(),
   trace: { symbol: null, label: null, mode: "calls", direction: "both", depth: 3, includeTests: false }
 };
+
+
+export function getActiveProject(): string | null {
+  return state.activeProject;
+}
+
+
+async function refreshSerenaConnected(): Promise<void> {
+  try {
+    const data = await getJson<{ projects: string[] }>("/api/serena/connected-projects");
+    state.serenaConnected = new Set(data.projects);
+  } catch {
+    // Serena discovery is best-effort - leave the previous (possibly stale) set in place
+    return;
+  }
+  if (!els.homeView.hidden) renderProjectGrid();
+  if (!els.workspaceView.hidden) renderSerenaProjectBadge();
+}
+
+function renderSerenaProjectBadge(): void {
+  const connected = Boolean(state.activeProject && state.serenaConnected.has(state.activeProject));
+  els.projectSerenaBadge.hidden = !state.activeProject;
+  els.projectSerenaBadge.textContent = connected ? "Serena connected" : "Serena not connected";
+  els.projectSerenaBadge.classList.toggle("is-connected", connected);
+}
+
+function serenaBadgeHtml(projectName: string): string {
+  if (!state.serenaConnected.has(projectName)) return "";
+  return `<span class="serena-badge is-connected" title="Serena is connected to this project">Serena</span>`;
+}
 
 function q<T extends Element>(id: string): T {
   return document.querySelector<T>(id)!;
@@ -105,12 +138,13 @@ const els = {
   recentProjects: q<HTMLElement>("#recentProjects"),
   recentProjectsGrid: q<HTMLDivElement>("#recentProjectsGrid"),
   homeButton: q<HTMLButtonElement>("#homeButton"),
-  allProjectsButton: q<HTMLButtonElement>("#allProjectsButton"),
   agentConfigButton: q<HTMLButtonElement>("#agentConfigButton"),
+  serenaButton: q<HTMLButtonElement>("#serenaButton"),
   moreMenu: q<HTMLDivElement>("#moreMenu"),
   moreMenuButton: q<HTMLButtonElement>("#moreMenuButton"),
   moreMenuPanel: q<HTMLDivElement>("#moreMenuPanel"),
   projectTitle: q<HTMLHeadingElement>("#projectTitle"),
+  projectSerenaBadge: q<HTMLSpanElement>("#projectSerenaBadge"),
   breadcrumb: q<HTMLElement>("#breadcrumb"),
   breadcrumbProject: q<HTMLSpanElement>("#breadcrumbProject"),
   breadcrumbPackage: q<HTMLSpanElement>("#breadcrumbPackage"),
@@ -301,6 +335,7 @@ async function boot(): Promise<void> {
   els.projectSort.value = prefs.projectSort;
   if (prefs.graphMode === "symbols") applyGraphMode("symbols");
   await loadProjects();
+  void refreshSerenaConnected();
   if (prefs.uiMode === "original") setUiMode("original");
 }
 
@@ -312,8 +347,8 @@ function bindEvents(): void {
     renderProjectGrid();
   });
   els.homeButton.addEventListener("click", () => showHome());
-  els.allProjectsButton.addEventListener("click", () => showHome());
   els.agentConfigButton.addEventListener("click", () => showAgentConfig());
+  els.serenaButton.addEventListener("click", () => showSerena());
   els.uiModePlus.addEventListener("click", () => setUiMode("plus"));
   els.uiModeOriginal.addEventListener("click", () => setUiMode("original"));
   els.originalUiRetry.addEventListener("click", () => void loadOriginalUi());
@@ -1347,6 +1382,8 @@ function showHome(): void {
   els.headerSearch.hidden = true;
   els.adrButton.hidden = true;
   els.queryButton.hidden = true;
+  els.moreMenu.hidden = true;
+  els.serenaButton.hidden = true;
   showSearchResults(false);
   renderProjectGrid();
 }
@@ -1359,6 +1396,8 @@ function showWorkspace(): void {
   els.headerSearch.hidden = false;
   els.adrButton.hidden = false;
   els.queryButton.hidden = false;
+  els.moreMenu.hidden = false;
+  els.serenaButton.hidden = false;
 }
 
 function setUiModeButtons(mode: "plus" | "original"): void {
@@ -1380,6 +1419,8 @@ function setUiMode(mode: "plus" | "original"): void {
   els.headerSearch.hidden = true;
   els.adrButton.hidden = true;
   els.queryButton.hidden = true;
+  els.moreMenu.hidden = true;
+  els.serenaButton.hidden = true;
   els.originalUiView.hidden = false;
   void loadOriginalUi();
 }
@@ -1522,6 +1563,7 @@ function renderRecentCard(project: CachedProject): HTMLButtonElement {
   card.innerHTML = `
     <header class="project-card-head">
       <h3 title="${escapeHtml(project.root_path)}">${escapeHtml(prettyPath(project.root_path))}</h3>
+      ${serenaBadgeHtml(project.project)}
     </header>
     <p class="project-card-meta">${formatNumber(project.nodes)} nodes · ${formatNumber(project.edges)} edges</p>
   `;
@@ -1545,6 +1587,11 @@ function renderProjectCard(group: ProjectGroup, forceExpand: boolean): HTMLEleme
     <header class="project-card-head">
       <h3>${escapeHtml(group.key)}</h3>
       <div class="project-card-head-meta">
+        ${
+          group.items.some((item) => state.serenaConnected.has(item.project.project))
+            ? `<span class="serena-badge is-connected" title="Serena is connected to a variant of this project">Serena</span>`
+            : ""
+        }
         ${group.items.length > 1 ? `<span class="project-card-count">${group.items.length} variants</span>` : ""}
         ${
           group.items.length === 1
@@ -1616,6 +1663,7 @@ function renderBranchRow(item: ProjectGroupItem): HTMLDivElement {
         <span class="branch-name" title="${escapeHtml(branchLabel)}">${escapeHtml(branchLabel)}</span>
         ${item.project.nodes < 5 ? '<span class="badge badge-sparse">sparse</span>' : ""}
         ${!item.project.path_exists ? '<span class="badge badge-missing">Missing</span>' : ""}
+        ${serenaBadgeHtml(item.project.project)}
       </span>
       <span class="path-text" title="${escapeHtml(item.project.root_path)}">${escapeHtml(item.project.root_path)}</span>
     </div>
@@ -1762,6 +1810,8 @@ async function loadActiveProject({ restoreFilters = false }: { restoreFilters?: 
   }
 
   renderSummary();
+  renderSerenaProjectBadge();
+  void refreshSerenaConnected();
   renderBreadcrumb();
   setGraphStatus(graphData.nodes.length ? "ready" : "empty");
   graph.setData(graphData.nodes, graphData.edges);

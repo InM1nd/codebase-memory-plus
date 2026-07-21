@@ -354,6 +354,28 @@ h1 {
   font-weight: 600;
 }
 
+.serena-badge {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  padding: 2px 7px;
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.serena-badge.is-connected {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.serena-badge[hidden] {
+  display: none;
+}
+
 .project-card-meta {
   color: var(--muted);
   font-size: 12px;
@@ -761,6 +783,21 @@ h2 {
   color: var(--ink);
   cursor: pointer;
   padding: 0 11px;
+}
+
+.app-header-actions .icon-button svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+
+#moreMenuButton svg circle {
+  fill: currentColor;
+  stroke: none;
 }
 
 .icon-button:hover,
@@ -2918,4 +2955,174 @@ h4 {
 
 .empty.is-success {
   color: var(--accent);
+}
+
+.serena-view {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 14px 18px;
+  overflow: auto;
+}
+
+.serena-view[hidden] {
+  display: none;
+}
+
+.serena-status {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.serena-overview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  background: var(--panel-2);
+}
+
+.serena-overview-grid > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+}
+
+.serena-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.serena-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.serena-section-head h3 {
+  margin: 0;
+  font-size: 13px;
+}
+
+.serena-tool-stats-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 8px;
+}
+
+.serena-tool-stats-card {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 1px solid var(--hairline);
+  border-radius: 7px;
+  background: var(--panel-2);
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.serena-tool-stats-card strong {
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.serena-tool-stats-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.serena-tool-stats-table th,
+.serena-tool-stats-table td {
+  text-align: left;
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.serena-memories {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.serena-memory-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border: 1px solid var(--hairline);
+  border-radius: 7px;
+  background: var(--panel-2);
+}
+
+.serena-memory-name {
+  flex: 1;
+  text-align: left;
+  border: none;
+  background: transparent;
+  color: var(--ink);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.serena-memory-rename,
+.serena-memory-delete {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.serena-memory-delete:hover {
+  color: var(--danger);
+}
+
+.serena-memory-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  background: var(--panel-2);
+}
+
+.serena-memory-editor-content {
+  min-height: 140px;
+  resize: vertical;
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--ink);
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  padding: 8px;
+}
+
+.serena-memory-editor-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.serena-logs {
+  max-height: 260px;
+  overflow: auto;
+  margin: 0;
+  padding: 10px;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  background: var(--panel-2);
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-word;
 }

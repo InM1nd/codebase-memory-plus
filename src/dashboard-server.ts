@@ -7,6 +7,7 @@ import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { BaseMemoryClient } from "./base-memory-client.js";
+import { SerenaClient, normalizeProjectPath } from "./serena-client.js";
 import { deleteAgentConfig, findDuplicates, scanAgentConfig, toggleAgentConfig } from "./agent-config-scanner.js";
 import {
   hasEmbeddings,
@@ -32,6 +33,7 @@ const host = process.env.HOST ?? "127.0.0.1";
 // Shared across requests - BaseMemoryClient.connect() no-ops once the stdio subprocess is up,
 // so this avoids re-spawning codebase-memory-mcp on every MCP-backed route.
 const baseClient = new BaseMemoryClient(config);
+const serenaClient = new SerenaClient();
 const root = join(fileURLToPath(new URL("..", import.meta.url)), "dashboard");
 
 const server = createServer(async (request, response) => {
@@ -396,7 +398,143 @@ async function handleApi(url: URL, request: IncomingMessage, response: ServerRes
     return;
   }
 
+  if (url.pathname === "/api/serena/connected-projects") {
+    try {
+      const [projects, activePaths] = await Promise.all([
+        listCachedProjects(config),
+        serenaClient.getActiveProjectPaths()
+      ]);
+      const activeSet = new Set(activePaths);
+      const connected = projects
+        .filter((project) => activeSet.has(normalizeProjectPath(project.root_path)))
+        .map((project) => project.project);
+      sendJson(response, 200, { projects: connected });
+    } catch (error) {
+      sendJson(response, 503, { error: `Serena unavailable: ${mcpErrorMessage(error)}` });
+    }
+    return;
+  }
+
+  if (url.pathname === "/api/serena/status") {
+    await withSerenaProjectRoot(url, response, async (rootPath) => {
+      sendJson(response, 200, await serenaClient.getStatus(rootPath));
+    });
+    return;
+  }
+
+  if (url.pathname === "/api/serena/overview") {
+    await withSerenaProjectRoot(url, response, async (rootPath) => {
+      const overview = await serenaClient.getOverview(rootPath);
+      sendJson(response, overview ? 200 : 503, overview ?? { error: "Serena instance not reachable" });
+    });
+    return;
+  }
+
+  if (url.pathname === "/api/serena/tool-stats") {
+    await withSerenaProjectRoot(url, response, async (rootPath) => {
+      const stats = await serenaClient.getToolStats(rootPath);
+      sendJson(response, stats ? 200 : 503, stats ?? { error: "Serena instance not reachable" });
+    });
+    return;
+  }
+
+  if (url.pathname === "/api/serena/logs") {
+    await withSerenaProjectRoot(url, response, async (rootPath) => {
+      const startIdx = Number(url.searchParams.get("startIdx") ?? 0);
+      const logs = await serenaClient.getLogs(rootPath, startIdx);
+      sendJson(response, logs ? 200 : 503, logs ?? { error: "Serena instance not reachable" });
+    });
+    return;
+  }
+
+  if (url.pathname === "/api/serena/memories") {
+    if (request.method === "POST") {
+      await withSerenaProjectRoot(url, response, async (rootPath) => {
+        try {
+          const body = await readJsonBody(request);
+          const name = typeof body.name === "string" ? body.name : "";
+          const content = typeof body.content === "string" ? body.content : "";
+          if (!name) throw new Error("Missing memory name");
+          await serenaClient.saveMemory(rootPath, name, content);
+          sendJson(response, 200, { ok: true });
+        } catch (error) {
+          sendJson(response, 503, { error: `Save memory failed: ${mcpErrorMessage(error)}` });
+        }
+      });
+      return;
+    }
+    await withSerenaProjectRoot(url, response, async (rootPath) => {
+      sendJson(response, 200, { memories: await serenaClient.getMemories(rootPath) });
+    });
+    return;
+  }
+
+  const serenaMemoryMatch = url.pathname.match(/^\/api\/serena\/memories\/([^/]+)$/);
+  if (serenaMemoryMatch) {
+    const name = decodeURIComponent(serenaMemoryMatch[1]);
+    if (request.method === "DELETE") {
+      await withSerenaProjectRoot(url, response, async (rootPath) => {
+        try {
+          await serenaClient.deleteMemory(rootPath, name);
+          sendJson(response, 200, { ok: true });
+        } catch (error) {
+          sendJson(response, 503, { error: `Delete memory failed: ${mcpErrorMessage(error)}` });
+        }
+      });
+      return;
+    }
+    await withSerenaProjectRoot(url, response, async (rootPath) => {
+      const memory = await serenaClient.getMemory(rootPath, name);
+      sendJson(response, memory ? 200 : 503, memory ?? { error: "Serena instance not reachable" });
+    });
+    return;
+  }
+
+  const serenaMemoryRenameMatch = url.pathname.match(/^\/api\/serena\/memories\/([^/]+)\/rename$/);
+  if (serenaMemoryRenameMatch) {
+    if (request.method !== "POST") {
+      sendJson(response, 405, { error: "Method not allowed" });
+      return;
+    }
+    const oldName = decodeURIComponent(serenaMemoryRenameMatch[1]);
+    await withSerenaProjectRoot(url, response, async (rootPath) => {
+      try {
+        const body = await readJsonBody(request);
+        const newName = typeof body.newName === "string" ? body.newName : "";
+        if (!newName) throw new Error("Missing newName");
+        await serenaClient.renameMemory(rootPath, oldName, newName);
+        sendJson(response, 200, { ok: true });
+      } catch (error) {
+        sendJson(response, 503, { error: `Rename memory failed: ${mcpErrorMessage(error)}` });
+      }
+    });
+    return;
+  }
+
   sendJson(response, 404, { error: "Unknown API route" });
+}
+
+async function withSerenaProjectRoot(
+  url: URL,
+  response: ServerResponse,
+  handler: (rootPath: string) => Promise<void>
+): Promise<void> {
+  const projectName = url.searchParams.get("project");
+  if (!projectName) {
+    sendJson(response, 400, { error: "Missing project query param" });
+    return;
+  }
+  const projects = await listCachedProjects(config);
+  const project = projects.find((entry) => entry.project === projectName);
+  if (!project) {
+    sendJson(response, 404, { error: "Project not found in local cache" });
+    return;
+  }
+  try {
+    await handler(project.root_path);
+  } catch (error) {
+    sendJson(response, 503, { error: `Serena unavailable: ${mcpErrorMessage(error)}` });
+  }
 }
 
 async function scanAgentConfigEntries(url: URL) {
