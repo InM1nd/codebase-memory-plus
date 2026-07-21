@@ -10,7 +10,8 @@ This repo gives you two independent things, both built on the same local graph c
   any MCP-compatible AI agent (Claude Code, Cursor, Codex, etc.).
 - **A local web dashboard** - project picker, package/symbol dependency graphs, relation
   filters, architecture/perf/duplicate insights, an Agent Config view for managing MCP
-  servers/skills/plugins across Claude Code, Cursor, and Codex, and a toggle to embed
+  servers/skills/plugins across Claude Code, Cursor, and Codex, a Serena panel for monitoring
+  and managing a Serena MCP session against the selected project, and a toggle to embed
   `codebase-memory-mcp`'s own built-in graph UI alongside it.
 
 ## Prerequisites
@@ -67,7 +68,7 @@ PORT=9000 CODEBASE_MEMORY_MCP_CACHE_DIR=/path/to/cache npm run dashboard
 
 ### Agent Config
 
-Open via the header's **···** menu → **Agent Config**. It scans MCP servers, skills, and
+Open via the header's **MCP & Skills** button. It scans MCP servers, skills, and
 plugins across Claude Code, Cursor, and Codex (both global and per-project configs) and shows
 them as one list, grouped by name so the same skill mirrored across tools appears once with a
 per-tool breakdown.
@@ -88,6 +89,36 @@ per-tool breakdown.
 - **Usage** - when available, shows Claude Code's own tracked invocation counts
   (`skillUsage`/`pluginUsage` in `~/.claude.json`), plus a `hooked` badge on plugins that
   register their own session hooks (so they stay active regardless of the skill toggle).
+
+### Serena
+
+If you also run [Serena](https://github.com/oraios/serena) (an LSP-based semantic coding MCP)
+against your projects, open its panel via the header's **Serena** button (only shown once a
+project is selected). This proxies Serena's own local dashboard REST API - it does not run any
+of Serena's LSP tools itself, so symbol/reference browsing still happens through Serena
+directly.
+
+**Prerequisite**: Serena's dashboard API is disabled by default. Set `web_dashboard: true` in
+`~/.serena/serena_config.yml` and restart your Serena session(s) - this is a global Serena
+setting, not per-project.
+
+- **Status** - detects whether Serena's dashboard is enabled, whether an instance is reachable
+  for the currently selected project, and whether that instance's *active* project actually
+  matches (Serena only works on one project per instance at a time, so a running instance
+  attached to a different project shows as connected-but-elsewhere, with the list of projects
+  it has registered).
+- **Discovery** - Serena exposes no endpoint that lists running instances, so discovery is a
+  bounded scan of the local port range Serena allocates dashboards from
+  (`24282`-`24297`). An instance outside that range, or one that doesn't answer within ~300ms,
+  won't be found.
+- **Project cards** - on the home screen and inside a project, a small **Serena** badge shows
+  whether a live Serena instance is currently active on that project.
+- **Overview & tool usage** - active project/language/context/modes, plus per-tool call counts
+  and estimated input/output token usage for the session.
+- **Memories** - list, view, create, edit, rename, and delete Serena's project memory files
+  (`.serena/memories/*.md`) directly from the panel.
+- **Log tail** - polls Serena's session log while the panel is open (paused when the tab or
+  panel isn't visible).
 
 ## Use the MCP server
 
